@@ -6,6 +6,7 @@ USBGPU = "USBGPU" in os.environ
 if USBGPU:
   os.environ['DEV'] = 'AMD'
   os.environ['AMD_IFACE'] = 'USB'
+from tinygrad.engine.jit import TinyJit
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
 import time
@@ -95,7 +96,10 @@ def frame_prepare_tinygrad(input_frame, M_inv, M_inv_uv, W, H):
   tensor = frames_to_tensor(yuv)
   return tensor
 
-
+def update_img_input_tinygrad(tensor, frame, M_inv, M_inv_uv, w, h):
+  tensor[:,:6] = tensor[:,6:]
+  tensor[:,6:] = frame_prepare_tinygrad(frame, M_inv, M_inv_uv, w, h)
+  return tensor
 
 def Tensor_from_cl(frame, cl_buffer):
   if TICI:
@@ -249,6 +253,8 @@ class ModelState:
     self.policy_output = np.zeros(policy_output_size, dtype=np.float32)
     self.parser = Parser()
 
+    self.update_img_jit = None
+
     with open(VISION_PKL_PATH, "rb") as f:
       self.vision_run = pickle.load(f)
 
@@ -266,7 +272,7 @@ class ModelState:
     new_desire = np.where(inputs['desire_pulse'] - self.prev_desire > .99, inputs['desire_pulse'], 0)
     self.prev_desire[:] = inputs['desire_pulse']
 
-    imgs_cl = {name: self.frames[name].prepare(bufs[name], transforms[name].flatten()) for name in self.vision_input_names}
+    #imgs_cl = {name: self.frames[name].prepare(bufs[name], transforms[name].flatten()) for name in self.vision_input_names}
 
     #if TICI and not USBGPU:
     #  # The imgs tensors are backed by opencl memory, only need init once
@@ -283,28 +289,18 @@ class ModelState:
     #   self.vision_inputs[k] = Tensor(v)
 
     #assert False, transforms.keys()
-    transform = transforms['img']
-    transform_wide = transforms['big_img']
-    buf = bufs['img']
-    wbuf = bufs['big_img']
+    if self.update_img_jit is None:
+      self.update_img_jit = TinyJit(update_img_input_tinygrad, prune=True)
+    
+    for key in bufs.keys():
+      scale_matrix = np.array([[0.5, 0, 0], [0, 0.5, 0], [0, 0, 1]])
+      transform = transforms[key]
+      M_inv = Tensor(transform)
+      M_inv_uv = Tensor(scale_matrix @ transform @ np.linalg.inv(scale_matrix))
 
-    scale_matrix = np.array([[0.5, 0, 0], [0, 0.5, 0], [0, 0, 1]])
-    M_inv = Tensor(transform)
-    M_inv_uv = Tensor(scale_matrix @ transform @ np.linalg.inv(scale_matrix))
-    M_inv_wide = Tensor(transform_wide)
-    M_inv_uv_wide = Tensor(scale_matrix @ transform_wide @ np.linalg.inv(scale_matrix))
+      frame = Tensor(self.frames[key].array_from_vision_buf(bufs[key]))
 
-    input_frame = Tensor(self.frames['img'].array_from_vision_buf(buf))
-    wide_input_frame = Tensor(self.frames['big_img'].array_from_vision_buf(wbuf))
-
-
-    # PURE TG
-    self.vision_inputs['img'][:,:6] = self.vision_inputs['img'][:,6:]
-    self.vision_inputs['img'][:,6:] = frame_prepare_tinygrad(input_frame, M_inv, M_inv_uv, buf.width, buf.height)
-
-    self.vision_inputs['big_img'][:,:6] = self.vision_inputs['big_img'][:,6:]
-    self.vision_inputs['big_img'][:,6:] = frame_prepare_tinygrad(wide_input_frame, M_inv_wide, M_inv_uv_wide, wbuf.width, wbuf.height)
-  # END OF PURE TG
+      self.vision_inputs[key] = self.update_img_jit(self.vision_inputs[key], frame, M_inv, M_inv_uv, bufs[key].width, bufs[key].height).clone()
 
     if prepare_only:
       return None
