@@ -16,13 +16,16 @@ def tensor_round(tensor):
 
 
 h_src, w_src = 1208, 1928
-h_dst, w_dst = MODEL_HEIGHT, MODEL_WIDTH
-x = tensor_arange(w_dst).reshape(1, w_dst).expand(h_dst, w_dst)
-y = tensor_arange(h_dst).reshape(h_dst, 1).expand(h_dst, w_dst)
-ones = Tensor.ones_like(x)
-dst_coords = x.reshape((1,-1)).cat(y.reshape((1,-1))).cat(ones.reshape((1,-1)))
+#h_dst, w_dst = MODEL_HEIGHT, MODEL_WIDTH
 
-def warp_perspective_tinygrad(src, M_inv):
+def warp_perspective_tinygrad(src, M_inv, dst_shape):
+  w_dst, h_dst = dst_shape
+  x = tensor_arange(w_dst).reshape(1, w_dst).expand(h_dst, w_dst)
+  y = tensor_arange(h_dst).reshape(h_dst, 1).expand(h_dst, w_dst)
+  ones = Tensor.ones_like(x)
+  dst_coords = x.reshape((1,-1)).cat(y.reshape((1,-1))).cat(ones.reshape((1,-1)))
+
+
   src_coords = M_inv @ dst_coords
   src_coords = src_coords / src_coords[2:3, :]
 
@@ -37,12 +40,35 @@ def warp_perspective_tinygrad(src, M_inv):
   dst = src.flatten()[idx]
   return dst.reshape(h_dst, w_dst)
 
+
+def frames_to_tensor(frames):
+  H = (frames.shape[1]*2)//3
+  W = frames.shape[2]
+  in_img1 = Tensor.zeros((frames.shape[0], 6, H//2, W//2), dtype='uint8').contiguous()
+
+  in_img1[:, 0] = frames[:, 0:H:2, 0::2]
+  in_img1[:, 1] = frames[:, 1:H:2, 0::2]
+  in_img1[:, 2] = frames[:, 0:H:2, 1::2]
+  in_img1[:, 3] = frames[:, 1:H:2, 1::2]
+  in_img1[:, 4] = frames[:, H:H+H//4].reshape((-1, H//2,W//2))
+  in_img1[:, 5] = frames[:, H+H//4:H+H//2].reshape((-1, H//2,W//2))
+
+  return in_img1
+
+def frame_prepare_tinygrad(input_frame, M_inv, M_inv_uv, W, H):
+  y = warp_perspective_tinygrad(input_frame[:H*W].reshape((H,W)), M_inv, (MODEL_WIDTH, MODEL_HEIGHT)).flatten()
+  u = warp_perspective_tinygrad(input_frame[H*W::2].reshape((H//2,W//2)), M_inv_uv, (MODEL_WIDTH//2, MODEL_HEIGHT//2)).flatten()
+  v = warp_perspective_tinygrad(input_frame[H*W+1::2].reshape((H//2,W//2)), M_inv_uv, (MODEL_WIDTH//2, MODEL_HEIGHT//2)).flatten()
+  yuv = y.cat(u).cat(v).reshape((1,MODEL_HEIGHT*3//2,MODEL_WIDTH))
+  tensor = frames_to_tensor(yuv)
+  return tensor
+
 if __name__ == "__main__":
   from tinygrad.engine.jit import TinyJit
   from tinygrad.device import Device
-  update_img_jit = TinyJit(warp_perspective_tinygrad, prune=True)
+  update_img_jit = TinyJit(frame_prepare_tinygrad, prune=True)
 
-  inputs = [Tensor.randn(1928,1208).realize(), Tensor.randn(3,3).realize()]
+  inputs = [Tensor.randn(1928*1208*3//2).realize(), Tensor.randn(3,3).realize(), Tensor.randn(3,3).realize(), 1928, 1208]
   # run 20 times
   step_times = []
   for _ in range(20):
