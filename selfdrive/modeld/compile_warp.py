@@ -32,12 +32,14 @@ def warp_perspective_tinygrad(src, M_inv):
   x_nearest = tensor_round(x_src).clip(0, w_src - 1).cast('int')
   y_nearest = tensor_round(y_src).clip(0, h_src - 1).cast('int')
 
-  dst = src[y_nearest, x_nearest]
-  return dst
-
+  # TODO: make 2d indexing fast
+  idx = y_nearest*src.shape[1] + x_nearest
+  dst = src.flatten()[idx]
+  return dst.reshape(h_dst, w_dst)
 
 if __name__ == "__main__":
   from tinygrad.engine.jit import TinyJit
+  from tinygrad.device import Device
   update_img_jit = TinyJit(warp_perspective_tinygrad, prune=True)
 
   inputs = [Tensor.randn(1928,1208).realize(), Tensor.randn(3,3).realize()]
@@ -48,6 +50,7 @@ if __name__ == "__main__":
     out = update_img_jit(*inputs)
     mt = time.perf_counter()
     val = out.realize()
+    Device.default.synchronize()
     et = time.perf_counter()
     step_times.append((et-st)*1e3)
     print(f"enqueue {(mt-st)*1e3:6.2f} ms -- total run {step_times[-1]:6.2f} ms")
