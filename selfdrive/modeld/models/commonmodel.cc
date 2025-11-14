@@ -6,6 +6,11 @@
 #include "common/clutil.h"
 
 DrivingModelFrame::DrivingModelFrame(cl_device_id device_id, cl_context context, int _temporal_skip) : ModelFrame(device_id, context) {
+
+  full_input_frame = std::make_unique<uint8_t[]>(full_img_size);
+  input_frames = std::make_unique<uint8_t[]>(buf_size);
+  input_frames_cl = CL_CHECK_ERR(clCreateBuffer(context, CL_MEM_READ_WRITE, buf_size, NULL, &err));
+
   input_frames = std::make_unique<uint8_t[]>(buf_size);
   temporal_skip = _temporal_skip;
   input_frames_cl = CL_CHECK_ERR(clCreateBuffer(context, CL_MEM_READ_WRITE, buf_size, NULL, &err));
@@ -33,6 +38,13 @@ cl_mem* DrivingModelFrame::prepare(cl_mem yuv_cl, int frame_width, int frame_hei
   clFinish(q);
   return &input_frames_cl;
 }
+
+uint8_t* ModelFrame::array_from_vision_buf(cl_mem *vision_buf) {
+  CL_CHECK(clEnqueueReadBuffer(q, *vision_buf, CL_TRUE, 0, full_img_size * sizeof(uint8_t), &full_input_frame[0], 0, nullptr, nullptr));
+  clFinish(q);
+  return &full_input_frame[0];
+}
+
 
 DrivingModelFrame::~DrivingModelFrame() {
   deinit_transform();

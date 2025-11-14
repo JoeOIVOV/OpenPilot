@@ -32,6 +32,13 @@ from openpilot.selfdrive.modeld.models.commonmodel_pyx import DrivingModelFrame,
 from openpilot.selfdrive.modeld.runners.tinygrad_helpers import qcom_tensor_from_opencl_address
 
 
+from tinygrad.tensor import Tensor
+import ctypes, array
+from tinygrad.dtype import dtypes
+from tinygrad.helpers import getenv, to_mv, mv_address
+Tensor.manual_seed(1337)
+Tensor.no_grad = True
+
 PROCESS_NAME = "selfdrive.modeld.modeld"
 SEND_RAW_PRED = os.getenv('SEND_RAW_PRED')
 
@@ -43,6 +50,75 @@ POLICY_METADATA_PATH = Path(__file__).parent / 'models/driving_policy_metadata.p
 LAT_SMOOTH_SECONDS = 0.1
 LONG_SMOOTH_SECONDS = 0.3
 MIN_LAT_CONTROL_SPEED = 0.3
+
+MODEL_WIDTH = 512
+MODEL_HEIGHT = 256
+MODEL_FRAME_SIZE = MODEL_WIDTH * MODEL_HEIGHT * 3 // 2
+IMG_INPUT_SHAPE = (1, 12, 128, 256)
+
+
+
+def tensor_arange(end):
+    return Tensor([float(i) for i in range(end)])
+
+def tensor_round(tensor):
+    return (tensor + 0.5).floor()
+
+def warp_perspective_tinygrad(src, M_inv, dsize):
+    h_dst, w_dst = dsize[1], dsize[0]
+    h_src, w_src = src.shape[:2]
+
+    x = tensor_arange(w_dst).reshape(1, w_dst).expand(h_dst, w_dst)
+    y = tensor_arange(h_dst).reshape(h_dst, 1).expand(h_dst, w_dst)
+    ones = Tensor.ones_like(x)
+    dst_coords = x.reshape((1,-1)).cat(y.reshape((1,-1))).cat(ones.reshape((1,-1)))
+
+
+    src_coords = M_inv @ dst_coords
+    src_coords = src_coords / src_coords[2:3, :]
+
+    x_src = src_coords[0].reshape(h_dst, w_dst)
+    y_src = src_coords[1].reshape(h_dst, w_dst)
+
+    x_nearest = tensor_round(x_src).clip(0, w_src - 1).cast('int')
+    y_nearest = tensor_round(y_src).clip(0, h_src - 1).cast('int')
+
+    dst = src[y_nearest, x_nearest]
+    return dst
+
+
+def frame_prepare_tinygrad(input_frame, M_inv, M_inv_uv, W, H):
+  y = warp_perspective_tinygrad(input_frame[:H*W].reshape((H,W)), M_inv, (MODEL_WIDTH, MODEL_HEIGHT)).flatten()
+  u = warp_perspective_tinygrad(input_frame[H*W::2].reshape((H//2,W//2)), M_inv_uv, (MODEL_WIDTH//2, MODEL_HEIGHT//2)).flatten()
+  v = warp_perspective_tinygrad(input_frame[H*W+1::2].reshape((H//2,W//2)), M_inv_uv, (MODEL_WIDTH//2, MODEL_HEIGHT//2)).flatten()
+  yuv = y.cat(u).cat(v).reshape((1,MODEL_HEIGHT*3//2,MODEL_WIDTH))
+  tensor = frames_to_tensor(yuv)
+  return tensor
+
+
+
+def Tensor_from_cl(frame, cl_buffer):
+  if TICI:
+    cl_buf_desc_ptr = to_mv(cl_buffer.mem_address, 8).cast('Q')[0]
+    rawbuf_ptr = to_mv(cl_buf_desc_ptr, 0x100).cast('Q')[20] # offset 0xA0 is a raw gpu pointer.
+    return Tensor.from_blob(rawbuf_ptr, IMG_INPUT_SHAPE, dtype=dtypes.uint8)
+  else:
+    return Tensor(frame.buffer_from_cl(cl_buffer)).reshape(IMG_INPUT_SHAPE)
+
+
+def frames_to_tensor(frames):
+  H = (frames.shape[1]*2)//3
+  W = frames.shape[2]
+  in_img1 = Tensor.zeros((frames.shape[0], 6, H//2, W//2), dtype='uint8').contiguous()
+
+  in_img1[:, 0] = frames[:, 0:H:2, 0::2]
+  in_img1[:, 1] = frames[:, 1:H:2, 0::2]
+  in_img1[:, 2] = frames[:, 0:H:2, 1::2]
+  in_img1[:, 3] = frames[:, 1:H:2, 1::2]
+  in_img1[:, 4] = frames[:, H:H+H//4].reshape((-1, H//2,W//2))
+  in_img1[:, 5] = frames[:, H+H//4:H+H//2].reshape((-1, H//2,W//2))
+
+  return in_img1
 
 
 def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.ModelDataV2.Action,
@@ -166,7 +242,8 @@ class ModelState:
     self.full_input_queues.reset()
 
     # img buffers are managed in openCL transform code
-    self.vision_inputs: dict[str, Tensor] = {}
+    self.vision_inputs: dict[str, Tensor] = {'img': Tensor.zeros(IMG_INPUT_SHAPE, dtype='uint8').contiguous().realize(),
+                      'big_img': Tensor.zeros(IMG_INPUT_SHAPE, dtype='uint8').contiguous().realize(),}
     self.vision_output = np.zeros(vision_output_size, dtype=np.float32)
     self.policy_inputs = {k: Tensor(v, device='NPY').realize() for k,v in self.numpy_inputs.items()}
     self.policy_output = np.zeros(policy_output_size, dtype=np.float32)
@@ -191,15 +268,43 @@ class ModelState:
 
     imgs_cl = {name: self.frames[name].prepare(bufs[name], transforms[name].flatten()) for name in self.vision_input_names}
 
-    if TICI and not USBGPU:
-      # The imgs tensors are backed by opencl memory, only need init once
-      for key in imgs_cl:
-        if key not in self.vision_inputs:
-          self.vision_inputs[key] = qcom_tensor_from_opencl_address(imgs_cl[key].mem_address, self.vision_input_shapes[key], dtype=dtypes.uint8)
-    else:
-      for key in imgs_cl:
-        frame_input = self.frames[key].buffer_from_cl(imgs_cl[key]).reshape(self.vision_input_shapes[key])
-        self.vision_inputs[key] = Tensor(frame_input, dtype=dtypes.uint8).realize()
+    #if TICI and not USBGPU:
+    #  # The imgs tensors are backed by opencl memory, only need init once
+    #  for key in imgs_cl:
+    #    if key not in self.vision_inputs:
+    #      self.vision_inputs[key] = qcom_tensor_from_opencl_address(imgs_cl[key].mem_address, self.vision_input_shapes[key], dtype=dtypes.uint8)
+    #else:
+    #  for key in imgs_cl:
+    #    frame_input = self.frames[key].buffer_from_cl(imgs_cl[key]).reshape(self.vision_input_shapes[key])
+    #    self.vision_inputs[key] = Tensor(frame_input, dtype=dtypes.uint8).realize()
+
+
+    #for k, v in self.numpy_inputs.items():
+    #   self.vision_inputs[k] = Tensor(v)
+
+    #assert False, transforms.keys()
+    transform = transforms['img']
+    transform_wide = transforms['big_img']
+    buf = bufs['img']
+    wbuf = bufs['big_img']
+
+    scale_matrix = np.array([[0.5, 0, 0], [0, 0.5, 0], [0, 0, 1]])
+    M_inv = Tensor(transform)
+    M_inv_uv = Tensor(scale_matrix @ transform @ np.linalg.inv(scale_matrix))
+    M_inv_wide = Tensor(transform_wide)
+    M_inv_uv_wide = Tensor(scale_matrix @ transform_wide @ np.linalg.inv(scale_matrix))
+
+    input_frame = Tensor(self.frames['img'].array_from_vision_buf(buf))
+    wide_input_frame = Tensor(self.frames['big_img'].array_from_vision_buf(wbuf))
+
+
+    # PURE TG
+    self.vision_inputs['img'][:,:6] = self.vision_inputs['img'][:,6:]
+    self.vision_inputs['img'][:,6:] = frame_prepare_tinygrad(input_frame, M_inv, M_inv_uv, buf.width, buf.height)
+
+    self.vision_inputs['big_img'][:,:6] = self.vision_inputs['big_img'][:,6:]
+    self.vision_inputs['big_img'][:,6:] = frame_prepare_tinygrad(wide_input_frame, M_inv_wide, M_inv_uv_wide, wbuf.width, wbuf.height)
+  # END OF PURE TG
 
     if prepare_only:
       return None

@@ -34,12 +34,20 @@ public:
   int MODEL_HEIGHT;
   int MODEL_FRAME_SIZE;
   int buf_size;
+  uint8_t* array_from_vision_buf(cl_mem *vision_buf);
+
+  // DONT HARDCODE THIS
+  const int RAW_IMG_HEIGHT = 1208;
+  const int RAW_IMG_WIDTH = 1928;
+  const int full_img_size = RAW_IMG_HEIGHT * RAW_IMG_WIDTH * 3 / 2;
 
 protected:
   cl_mem y_cl, u_cl, v_cl;
   Transform transform;
   cl_command_queue q;
+  cl_mem net_input_cl, input_frames_cl;
   std::unique_ptr<uint8_t[]> input_frames;
+  std::unique_ptr<uint8_t[]> full_input_frame;
 
   void init_transform(cl_device_id device_id, cl_context context, int model_width, int model_height) {
     y_cl = CL_CHECK_ERR(clCreateBuffer(context, CL_MEM_READ_WRITE, model_width * model_height, NULL, &err));
@@ -66,12 +74,15 @@ class DrivingModelFrame : public ModelFrame {
 public:
   DrivingModelFrame(cl_device_id device_id, cl_context context, int _temporal_skip);
   ~DrivingModelFrame();
+  uint8_t* buffer_from_cl(cl_mem *in_frames);
   cl_mem* prepare(cl_mem yuv_cl, int frame_width, int frame_height, int frame_stride, int frame_uv_offset, const mat3& projection);
 
   const int MODEL_WIDTH = 512;
   const int MODEL_HEIGHT = 256;
   const int MODEL_FRAME_SIZE = MODEL_WIDTH * MODEL_HEIGHT * 3 / 2;
   const int buf_size = MODEL_FRAME_SIZE * 2; // 2 frames are temporal_skip frames apart
+  
+
   const size_t frame_size_bytes = MODEL_FRAME_SIZE * sizeof(uint8_t);
 
 private:
