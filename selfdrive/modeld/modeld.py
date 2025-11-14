@@ -57,7 +57,7 @@ MIN_LAT_CONTROL_SPEED = 0.3
 MODEL_WIDTH = 512
 MODEL_HEIGHT = 256
 MODEL_FRAME_SIZE = MODEL_WIDTH * MODEL_HEIGHT * 3 // 2
-IMG_INPUT_SHAPE = (1, 12, 128, 256)
+IMG_INPUT_SHAPE = (1, 30, 128, 256)
 
 
 
@@ -98,34 +98,24 @@ def frame_prepare_tinygrad(input_frame, M_inv, M_inv_uv, W, H):
   v = warp_perspective_tinygrad(input_frame[H*W+1::2].reshape((H//2,W//2)), M_inv_uv, (MODEL_WIDTH//2, MODEL_HEIGHT//2)).flatten()
   yuv = y.cat(u).cat(v).reshape((1,MODEL_HEIGHT*3//2,MODEL_WIDTH))
   tensor = frames_to_tensor(yuv)
+  print(tensor.shape)
   return tensor
 
 def update_img_input_tinygrad(tensor, frame, M_inv, M_inv_uv, w, h):
-  tensor[:,:6] = tensor[:,6:]
-  tensor[:,6:] = frame_prepare_tinygrad(frame, M_inv, M_inv_uv, w, h)
-  return tensor
-
-def Tensor_from_cl(frame, cl_buffer):
-  if TICI:
-    cl_buf_desc_ptr = to_mv(cl_buffer.mem_address, 8).cast('Q')[0]
-    rawbuf_ptr = to_mv(cl_buf_desc_ptr, 0x100).cast('Q')[20] # offset 0xA0 is a raw gpu pointer.
-    return Tensor.from_blob(rawbuf_ptr, IMG_INPUT_SHAPE, dtype=dtypes.uint8)
-  else:
-    return Tensor(frame.buffer_from_cl(cl_buffer)).reshape(IMG_INPUT_SHAPE)
+  tensor[:,:6] = tensor[:,-6:]
+  tensor[:,-6:] = frame_prepare_tinygrad(frame, M_inv, M_inv_uv, w, h)
+  return tensor, Tensor.cat(tensor[:,:6], tensor[:,-6:], dim=1)
 
 
 def frames_to_tensor(frames):
   H = (frames.shape[1]*2)//3
   W = frames.shape[2]
-  in_img1 = Tensor.zeros((frames.shape[0], 6, H//2, W//2), dtype='uint8').contiguous()
-
-  in_img1[:, 0] = frames[:, 0:H:2, 0::2]
-  in_img1[:, 1] = frames[:, 1:H:2, 0::2]
-  in_img1[:, 2] = frames[:, 0:H:2, 1::2]
-  in_img1[:, 3] = frames[:, 1:H:2, 1::2]
-  in_img1[:, 4] = frames[:, H:H+H//4].reshape((-1, H//2,W//2))
-  in_img1[:, 5] = frames[:, H+H//4:H+H//2].reshape((-1, H//2,W//2))
-
+  in_img1 = Tensor.cat(frames[:, 0:H:2, 0::2],
+                        frames[:, 1:H:2, 0::2],
+                        frames[:, 0:H:2, 1::2],
+                        frames[:, 1:H:2, 1::2],
+                        frames[:, H:H+H//4].reshape((-1, H//2,W//2)),
+                        frames[:, H+H//4:H+H//2].reshape((-1, H//2,W//2)), dim=1).reshape((frames.shape[0], 6, H//2, W//2))
   return in_img1
 
 
@@ -250,8 +240,8 @@ class ModelState:
     self.full_input_queues.reset()
 
     # img buffers are managed in openCL transform code
-    self.vision_inputs: dict[str, Tensor] = {'img': Tensor.zeros(IMG_INPUT_SHAPE, dtype='uint8').contiguous().realize(),
-                      'big_img': Tensor.zeros(IMG_INPUT_SHAPE, dtype='uint8').contiguous().realize(),}
+    self.full_img_input = {'img': Tensor.zeros(IMG_INPUT_SHAPE, dtype='uint8').contiguous().realize(),
+                                             'big_img': Tensor.zeros(IMG_INPUT_SHAPE, dtype='uint8').contiguous().realize(),}
     self.vision_output = np.zeros(vision_output_size, dtype=np.float32)
     self.policy_inputs = {k: Tensor(v, device='NPY').realize() for k,v in self.numpy_inputs.items()}
     self.policy_output = np.zeros(policy_output_size, dtype=np.float32)
@@ -293,6 +283,7 @@ class ModelState:
     #   self.vision_inputs[k] = Tensor(v)
 
     #assert False, transforms.keys()
+    vision_inputs = {}
     if self.update_img_jit is None:
       self.update_img_jit = TinyJit(update_img_input_tinygrad, prune=True)
     
@@ -305,7 +296,9 @@ class ModelState:
       frame = Tensor(self.frames[key].array_from_vision_buf(bufs[key]))
 
       t0 = time.perf_counter()
-      self.vision_inputs[key] = self.update_img_jit(self.vision_inputs[key], frame, M_inv, M_inv_uv, bufs[key].width, bufs[key].height).clone()
+      
+      self.full_img_input[key], vision_inputs[key] = self.update_img_jit(self.full_img_input[key], frame, M_inv, M_inv_uv, bufs[key].width, bufs[key].height)
+      vision_inputs[key] = vision_inputs[key].clone()
       Device.default.synchronize()
       t1 = time.perf_counter()
       print(f"update_img_jit took {(t1 - t0) * 1000:.2f} ms")
@@ -313,7 +306,7 @@ class ModelState:
     if prepare_only:
       return None
 
-    self.vision_output = self.vision_run(**self.vision_inputs).contiguous().realize().uop.base.buffer.numpy()
+    self.vision_output = self.vision_run(**vision_inputs).contiguous().realize().uop.base.buffer.numpy()
     vision_outputs_dict = self.parser.parse_vision_outputs(self.slice_outputs(self.vision_output, self.vision_output_slices))
 
     self.full_input_queues.enqueue({'features_buffer': vision_outputs_dict['hidden_state'], 'desire_pulse': new_desire})
