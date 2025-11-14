@@ -37,6 +37,8 @@ from tinygrad.tensor import Tensor
 import ctypes, array
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import getenv, to_mv, mv_address
+from tinygrad.device import Device
+
 Tensor.manual_seed(1337)
 Tensor.no_grad = True
 
@@ -84,8 +86,10 @@ def warp_perspective_tinygrad(src, M_inv, dsize):
     x_nearest = tensor_round(x_src).clip(0, w_src - 1).cast('int')
     y_nearest = tensor_round(y_src).clip(0, h_src - 1).cast('int')
 
-    dst = src[y_nearest, x_nearest]
-    return dst
+    # TODO: make 2d indexing fast
+    idx = y_nearest*src.shape[1] + x_nearest
+    dst = src.flatten()[idx]
+    return dst.reshape(h_dst, w_dst)
 
 
 def frame_prepare_tinygrad(input_frame, M_inv, M_inv_uv, W, H):
@@ -300,7 +304,11 @@ class ModelState:
 
       frame = Tensor(self.frames[key].array_from_vision_buf(bufs[key]))
 
+      t0 = time.perf_counter()
       self.vision_inputs[key] = self.update_img_jit(self.vision_inputs[key], frame, M_inv, M_inv_uv, bufs[key].width, bufs[key].height).clone()
+      Device.default.synchronize()
+      t1 = time.perf_counter()
+      print(f"update_img_jit took {(t1 - t0) * 1000:.2f} ms")
 
     if prepare_only:
       return None
