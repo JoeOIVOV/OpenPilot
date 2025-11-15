@@ -50,6 +50,9 @@ POLICY_PKL_PATH = Path(__file__).parent / 'models/driving_policy_tinygrad.pkl'
 VISION_METADATA_PATH = Path(__file__).parent / 'models/driving_vision_metadata.pkl'
 POLICY_METADATA_PATH = Path(__file__).parent / 'models/driving_policy_metadata.pkl'
 
+WARP_PKL_PATH = Path(__file__).parent / 'models/warp_tinygrad.pkl'
+WARP_BIG_PKL_PATH = Path(__file__).parent / 'models/warp_big_tinygrad.pkl'
+
 LAT_SMOOTH_SECONDS = 0.1
 LONG_SMOOTH_SECONDS = 0.3
 MIN_LAT_CONTROL_SPEED = 0.3
@@ -59,63 +62,6 @@ MODEL_HEIGHT = 256
 MODEL_FRAME_SIZE = MODEL_WIDTH * MODEL_HEIGHT * 3 // 2
 IMG_INPUT_SHAPE = (1, 30, 128, 256)
 
-
-
-def tensor_arange(end):
-    return Tensor([float(i) for i in range(end)])
-
-def tensor_round(tensor):
-    return (tensor + 0.5).floor()
-
-def warp_perspective_tinygrad(src, M_inv, dsize):
-    h_dst, w_dst = dsize[1], dsize[0]
-    h_src, w_src = src.shape[:2]
-
-    x = tensor_arange(w_dst).reshape(1, w_dst).expand(h_dst, w_dst)
-    y = tensor_arange(h_dst).reshape(h_dst, 1).expand(h_dst, w_dst)
-    ones = Tensor.ones_like(x)
-    dst_coords = x.reshape((1,-1)).cat(y.reshape((1,-1))).cat(ones.reshape((1,-1)))
-
-
-    src_coords = M_inv @ dst_coords
-    src_coords = src_coords / src_coords[2:3, :]
-
-    x_src = src_coords[0].reshape(h_dst, w_dst)
-    y_src = src_coords[1].reshape(h_dst, w_dst)
-
-    x_nearest = tensor_round(x_src).clip(0, w_src - 1).cast('int')
-    y_nearest = tensor_round(y_src).clip(0, h_src - 1).cast('int')
-
-    # TODO: make 2d indexing fast
-    idx = y_nearest*src.shape[1] + x_nearest
-    dst = src.flatten()[idx]
-    return dst.reshape(h_dst, w_dst)
-
-def frames_to_tensor(frames):
-  H = (frames.shape[1]*2)//3
-  W = frames.shape[2]
-  in_img1 = Tensor.cat(frames[:, 0:H:2, 0::2],
-                        frames[:, 1:H:2, 0::2],
-                        frames[:, 0:H:2, 1::2],
-                        frames[:, 1:H:2, 1::2],
-                        frames[:, H:H+H//4].reshape((-1, H//2,W//2)),
-                        frames[:, H+H//4:H+H//2].reshape((-1, H//2,W//2)), dim=1).reshape((frames.shape[0], 6, H//2, W//2))
-  return in_img1
-
-
-def frame_prepare_tinygrad(input_frame, M_inv, M_inv_uv, W, H):
-  y = warp_perspective_tinygrad(input_frame[:H*W].reshape((H,W)), M_inv, (MODEL_WIDTH, MODEL_HEIGHT)).flatten()
-  u = warp_perspective_tinygrad(input_frame[H*W::2].reshape((H//2,W//2)), M_inv_uv, (MODEL_WIDTH//2, MODEL_HEIGHT//2)).flatten()
-  v = warp_perspective_tinygrad(input_frame[H*W+1::2].reshape((H//2,W//2)), M_inv_uv, (MODEL_WIDTH//2, MODEL_HEIGHT//2)).flatten()
-  yuv = y.cat(u).cat(v).reshape((1,MODEL_HEIGHT*3//2,MODEL_WIDTH))
-  tensor = frames_to_tensor(yuv)
-  return tensor
-
-
-def update_img_input_tinygrad(tensor, frame, M_inv, M_inv_uv, w, h):
-  tensor[:,:6] = tensor[:,-6:]
-  tensor[:,-6:] = frame_prepare_tinygrad(frame, M_inv, M_inv_uv, w, h)
-  return tensor, Tensor.cat(tensor[:,:6], tensor[:,-6:], dim=1)
 
 def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.ModelDataV2.Action,
                           lat_action_t: float, long_action_t: float, v_ego: float) -> log.ModelDataV2.Action:
@@ -245,13 +191,18 @@ class ModelState:
     self.policy_output = np.zeros(policy_output_size, dtype=np.float32)
     self.parser = Parser()
 
-    self.update_img_jit = {}
 
     with open(VISION_PKL_PATH, "rb") as f:
       self.vision_run = pickle.load(f)
 
     with open(POLICY_PKL_PATH, "rb") as f:
       self.policy_run = pickle.load(f)
+  
+    self.update_img_jit = {}
+    with open(WARP_PKL_PATH, "rb") as f:
+      self.update_img_jit['img'] = pickle.load(f)
+    with open(WARP_BIG_PKL_PATH, "rb") as f:
+      self.update_img_jit['big_img'] = pickle.load(f)
 
   def slice_outputs(self, model_outputs: np.ndarray, output_slices: dict[str, slice]) -> dict[str, np.ndarray]:
     parsed_model_outputs = {k: model_outputs[np.newaxis, v] for k,v in output_slices.items()}

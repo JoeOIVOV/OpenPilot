@@ -1,6 +1,9 @@
+from pathlib import Path
 import time
 from tinygrad.tensor import Tensor
 
+WARP_PKL_PATH = Path(__file__).parent / 'models/warp_tinygrad.pkl'
+WARP_BIG_PKL_PATH = Path(__file__).parent / 'models/warp_big_tinygrad.pkl'
 
 MODEL_WIDTH = 512
 MODEL_HEIGHT = 256
@@ -64,21 +67,29 @@ def update_img_input_tinygrad(tensor, frame, M_inv, M_inv_uv, w, h):
   tensor[:,-6:] = frame_prepare_tinygrad(frame, M_inv, M_inv_uv, w, h)
   return tensor, Tensor.cat(tensor[:,:6], tensor[:,-6:], dim=1)
 
-if __name__ == "__main__":
+
+
+def run_and_save_pickle(path):
   from tinygrad.engine.jit import TinyJit
   from tinygrad.device import Device
   update_img_jit = TinyJit(update_img_input_tinygrad, prune=True)
 
-  inputs = [Tensor.randn((1, 30, 128, 256), dtype='uint8').realize(), Tensor.randn(1928*1208*3//2).realize(), Tensor.randn(3,3).realize(), Tensor.randn(3,3).realize(), 1928, 1208]
+  inputs = [Tensor.randn((1, 30, 128, 256), dtype='uint8').realize(), Tensor.randn(1928*1208*3//2, dtype='uint8').realize(), Tensor.randn(3,3).realize(), Tensor.randn(3,3).realize(), 1928, 1208]
   # run 20 times
   step_times = []
   for _ in range(20):
     st = time.perf_counter()
     out = update_img_jit(*inputs)
     mt = time.perf_counter()
-    val = out[0].realize()
-    val = out[1].realize()
     Device.default.synchronize()
     et = time.perf_counter()
     step_times.append((et-st)*1e3)
     print(f"enqueue {(mt-st)*1e3:6.2f} ms -- total run {step_times[-1]:6.2f} ms")
+
+  import pickle
+  with open(path, "wb") as f:
+    pickle.dump(update_img_jit, f)
+
+if __name__ == "__main__":
+    run_and_save_pickle(WARP_PKL_PATH)
+    run_and_save_pickle(WARP_BIG_PKL_PATH)
