@@ -247,7 +247,7 @@ class ModelState:
     self.policy_output = np.zeros(policy_output_size, dtype=np.float32)
     self.parser = Parser()
 
-    self.update_img_jit = None
+    self.update_img_jit = {}
 
     with open(VISION_PKL_PATH, "rb") as f:
       self.vision_run = pickle.load(f)
@@ -284,10 +284,11 @@ class ModelState:
 
     #assert False, transforms.keys()
     vision_inputs = {}
-    if self.update_img_jit is None:
-      self.update_img_jit = TinyJit(update_img_input_tinygrad, prune=True)
     
     for key in bufs.keys():
+      if key not in self.update_img_jit:
+        self.update_img_jit[key] = TinyJit(update_img_input_tinygrad, prune=True)
+
       scale_matrix = np.array([[0.5, 0, 0], [0, 0.5, 0], [0, 0, 1]])
       transform = transforms[key]
       M_inv = Tensor(transform, dtype=dtypes.float32)
@@ -297,9 +298,9 @@ class ModelState:
 
       t0 = time.perf_counter()
       
-      self.full_img_input[key], vision_inputs[key] = self.update_img_jit(self.full_img_input[key], frame, M_inv, M_inv_uv, bufs[key].width, bufs[key].height)
-      vision_inputs[key] = vision_inputs[key].clone()
-      Device.default.synchronize()
+      self.full_img_input[key], vision_inputs[key] = self.update_img_jit[key](self.full_img_input[key], frame, M_inv, M_inv_uv, bufs[key].width, bufs[key].height)
+      #vision_inputs[key] = vision_inputs[key].clone()
+      #Device.default.synchronize()
       t1 = time.perf_counter()
       print(f"update_img_jit took {(t1 - t0) * 1000:.2f} ms")
 
