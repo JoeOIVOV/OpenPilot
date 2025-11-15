@@ -91,22 +91,6 @@ def warp_perspective_tinygrad(src, M_inv, dsize):
     dst = src.flatten()[idx]
     return dst.reshape(h_dst, w_dst)
 
-
-def frame_prepare_tinygrad(input_frame, M_inv, M_inv_uv, W, H):
-  y = warp_perspective_tinygrad(input_frame[:H*W].reshape((H,W)), M_inv, (MODEL_WIDTH, MODEL_HEIGHT)).flatten()
-  u = warp_perspective_tinygrad(input_frame[H*W::2].reshape((H//2,W//2)), M_inv_uv, (MODEL_WIDTH//2, MODEL_HEIGHT//2)).flatten()
-  v = warp_perspective_tinygrad(input_frame[H*W+1::2].reshape((H//2,W//2)), M_inv_uv, (MODEL_WIDTH//2, MODEL_HEIGHT//2)).flatten()
-  yuv = y.cat(u).cat(v).reshape((1,MODEL_HEIGHT*3//2,MODEL_WIDTH))
-  tensor = frames_to_tensor(yuv)
-  print(tensor.shape)
-  return tensor
-
-def update_img_input_tinygrad(tensor, frame, M_inv, M_inv_uv, w, h):
-  tensor[:,:6] = tensor[:,-6:]
-  tensor[:,-6:] = frame_prepare_tinygrad(frame, M_inv, M_inv_uv, w, h)
-  return tensor, Tensor.cat(tensor[:,:6], tensor[:,-6:], dim=1)
-
-
 def frames_to_tensor(frames):
   H = (frames.shape[1]*2)//3
   W = frames.shape[2]
@@ -118,6 +102,20 @@ def frames_to_tensor(frames):
                         frames[:, H+H//4:H+H//2].reshape((-1, H//2,W//2)), dim=1).reshape((frames.shape[0], 6, H//2, W//2))
   return in_img1
 
+
+def frame_prepare_tinygrad(input_frame, M_inv, M_inv_uv, W, H):
+  y = warp_perspective_tinygrad(input_frame[:H*W].reshape((H,W)), M_inv, (MODEL_WIDTH, MODEL_HEIGHT)).flatten()
+  u = warp_perspective_tinygrad(input_frame[H*W::2].reshape((H//2,W//2)), M_inv_uv, (MODEL_WIDTH//2, MODEL_HEIGHT//2)).flatten()
+  v = warp_perspective_tinygrad(input_frame[H*W+1::2].reshape((H//2,W//2)), M_inv_uv, (MODEL_WIDTH//2, MODEL_HEIGHT//2)).flatten()
+  yuv = y.cat(u).cat(v).reshape((1,MODEL_HEIGHT*3//2,MODEL_WIDTH))
+  tensor = frames_to_tensor(yuv)
+  return tensor
+
+
+def update_img_input_tinygrad(tensor, frame, M_inv, M_inv_uv, w, h):
+  tensor[:,:6] = tensor[:,-6:]
+  tensor[:,-6:] = frame_prepare_tinygrad(frame, M_inv, M_inv_uv, w, h)
+  return tensor, Tensor.cat(tensor[:,:6], tensor[:,-6:], dim=1)
 
 def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.ModelDataV2.Action,
                           lat_action_t: float, long_action_t: float, v_ego: float) -> log.ModelDataV2.Action:

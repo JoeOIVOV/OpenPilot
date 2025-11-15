@@ -40,19 +40,15 @@ def warp_perspective_tinygrad(src, M_inv, dst_shape):
   dst = src.flatten()[idx]
   return dst.reshape(h_dst, w_dst)
 
-
 def frames_to_tensor(frames):
   H = (frames.shape[1]*2)//3
   W = frames.shape[2]
-  in_img1 = Tensor.zeros((frames.shape[0], 6, H//2, W//2), dtype='uint8').contiguous()
-
-  in_img1[:, 0] = frames[:, 0:H:2, 0::2]
-  in_img1[:, 1] = frames[:, 1:H:2, 0::2]
-  in_img1[:, 2] = frames[:, 0:H:2, 1::2]
-  in_img1[:, 3] = frames[:, 1:H:2, 1::2]
-  in_img1[:, 4] = frames[:, H:H+H//4].reshape((-1, H//2,W//2))
-  in_img1[:, 5] = frames[:, H+H//4:H+H//2].reshape((-1, H//2,W//2))
-
+  in_img1 = Tensor.cat(frames[:, 0:H:2, 0::2],
+                        frames[:, 1:H:2, 0::2],
+                        frames[:, 0:H:2, 1::2],
+                        frames[:, 1:H:2, 1::2],
+                        frames[:, H:H+H//4].reshape((-1, H//2,W//2)),
+                        frames[:, H+H//4:H+H//2].reshape((-1, H//2,W//2)), dim=1).reshape((frames.shape[0], 6, H//2, W//2))
   return in_img1
 
 def frame_prepare_tinygrad(input_frame, M_inv, M_inv_uv, W, H):
@@ -63,19 +59,25 @@ def frame_prepare_tinygrad(input_frame, M_inv, M_inv_uv, W, H):
   tensor = frames_to_tensor(yuv)
   return tensor
 
+def update_img_input_tinygrad(tensor, frame, M_inv, M_inv_uv, w, h):
+  tensor[:,:6] = tensor[:,-6:]
+  tensor[:,-6:] = frame_prepare_tinygrad(frame, M_inv, M_inv_uv, w, h)
+  return tensor, Tensor.cat(tensor[:,:6], tensor[:,-6:], dim=1)
+
 if __name__ == "__main__":
   from tinygrad.engine.jit import TinyJit
   from tinygrad.device import Device
-  update_img_jit = TinyJit(frame_prepare_tinygrad, prune=True)
+  update_img_jit = TinyJit(update_img_input_tinygrad, prune=True)
 
-  inputs = [Tensor.randn(1928*1208*3//2).realize(), Tensor.randn(3,3).realize(), Tensor.randn(3,3).realize(), 1928, 1208]
+  inputs = [Tensor.randn((1, 30, 128, 256), dtype='uint8').realize(), Tensor.randn(1928*1208*3//2).realize(), Tensor.randn(3,3).realize(), Tensor.randn(3,3).realize(), 1928, 1208]
   # run 20 times
   step_times = []
   for _ in range(20):
     st = time.perf_counter()
     out = update_img_jit(*inputs)
     mt = time.perf_counter()
-    val = out.realize()
+    val = out[0].realize()
+    val = out[1].realize()
     Device.default.synchronize()
     et = time.perf_counter()
     step_times.append((et-st)*1e3)
