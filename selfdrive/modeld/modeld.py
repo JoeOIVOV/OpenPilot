@@ -290,8 +290,8 @@ class ModelState:
     for key in bufs.keys():
       scale_matrix = np.array([[0.5, 0, 0], [0, 0.5, 0], [0, 0, 1]])
       transform = transforms[key]
-      M_inv = Tensor(transform)
-      M_inv_uv = Tensor(scale_matrix @ transform @ np.linalg.inv(scale_matrix))
+      M_inv = Tensor(transform, dtype=dtypes.float32)
+      M_inv_uv = Tensor(scale_matrix @ transform @ np.linalg.inv(scale_matrix), dtype=dtypes.float32)
 
       frame = Tensor(self.frames[key].array_from_vision_buf(bufs[key]))
 
