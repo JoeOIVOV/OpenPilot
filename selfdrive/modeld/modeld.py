@@ -239,14 +239,12 @@ class ModelState:
 
       frame = Tensor(self.frames[key].array_from_vision_buf(bufs[key]))
 
-      t0 = time.perf_counter()
       warp_args[key] = (self.full_img_input[key], frame, M_inv, M_inv_uv)
-      #vision_inputs[key] = vision_inputs[key].clone()
-      #Device.default.synchronize()
-      t1 = time.perf_counter()
-      print(f"update_img_jit took {(t1 - t0) * 1000:.2f} ms")
-
+    t0 = time.perf_counter()
     vision_inputs['img'], vision_inputs['big_img'] = self.update_imgs_tinygrad(warp_args['img'], warp_args['big_img'])
+    Device.default.synchronize()
+    t1 = time.perf_counter()
+    print(f"update_img_jit took {(t1 - t0) * 1000:.2f} ms")
 
     if prepare_only:
       return None
