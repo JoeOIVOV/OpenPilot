@@ -51,7 +51,6 @@ VISION_METADATA_PATH = Path(__file__).parent / 'models/driving_vision_metadata.p
 POLICY_METADATA_PATH = Path(__file__).parent / 'models/driving_policy_metadata.pkl'
 
 WARP_PKL_PATH = Path(__file__).parent / 'models/warp_tinygrad.pkl'
-WARP_BIG_PKL_PATH = Path(__file__).parent / 'models/warp_big_tinygrad.pkl'
 
 LAT_SMOOTH_SECONDS = 0.1
 LONG_SMOOTH_SECONDS = 0.3
@@ -198,11 +197,8 @@ class ModelState:
     with open(POLICY_PKL_PATH, "rb") as f:
       self.policy_run = pickle.load(f)
   
-    self.update_img_jit = {}
     with open(WARP_PKL_PATH, "rb") as f:
-      self.update_img_jit['img'] = pickle.load(f)
-    with open(WARP_BIG_PKL_PATH, "rb") as f:
-      self.update_img_jit['big_img'] = pickle.load(f)
+      self.update_imgs_tinygrad = pickle.load(f)
 
   def slice_outputs(self, model_outputs: np.ndarray, output_slices: dict[str, slice]) -> dict[str, np.ndarray]:
     parsed_model_outputs = {k: model_outputs[np.newaxis, v] for k,v in output_slices.items()}
@@ -234,10 +230,8 @@ class ModelState:
     #assert False, transforms.keys()
     vision_inputs = {}
     
+    warp_args = {}
     for key in bufs.keys():
-      if key not in self.update_img_jit:
-        self.update_img_jit[key] = TinyJit(update_img_input_tinygrad, prune=True)
-
       scale_matrix = np.array([[0.5, 0, 0], [0, 0.5, 0], [0, 0, 1]])
       transform = transforms[key]
       M_inv = Tensor(transform, dtype=dtypes.float32)
@@ -246,12 +240,13 @@ class ModelState:
       frame = Tensor(self.frames[key].array_from_vision_buf(bufs[key]))
 
       t0 = time.perf_counter()
-      
-      self.full_img_input[key], vision_inputs[key] = self.update_img_jit[key](self.full_img_input[key], frame, M_inv, M_inv_uv, bufs[key].width, bufs[key].height)
+      warp_args[key] = (self.full_img_input[key], frame, M_inv, M_inv_uv)
       #vision_inputs[key] = vision_inputs[key].clone()
       #Device.default.synchronize()
       t1 = time.perf_counter()
       print(f"update_img_jit took {(t1 - t0) * 1000:.2f} ms")
+
+    vision_inputs['img'], vision_inputs['big_img'] = self.update_imgs_tinygrad(warp_args['img'], warp_args['big_img'])
 
     if prepare_only:
       return None
