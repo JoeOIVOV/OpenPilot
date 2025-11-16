@@ -241,7 +241,10 @@ class ModelState:
 
       warp_args[key] = (self.full_img_input[key], frame, M_inv, M_inv_uv)
     t0 = time.perf_counter()
-    vision_inputs['img'], vision_inputs['big_img'] = self.update_imgs_tinygrad(warp_args['img'], warp_args['big_img'])
+    out, out_big = self.update_imgs_tinygrad(warp_args['img'], warp_args['big_img'])
+    self.full_img_input['img'], self.full_img_input['big_img'] = out[0], out_big[0]
+    vision_inputs['img'], vision_inputs['big_img'] = out[1], out_big[1]
+    print(self.full_img_input['img'].numpy()[0,:,:5,:5])
     Device.default.synchronize()
     t1 = time.perf_counter()
     print(f"update_img_jit took {(t1 - t0) * 1000:.2f} ms")

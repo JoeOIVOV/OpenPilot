@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 from pathlib import Path
 import time
 from tinygrad.tensor import Tensor
@@ -67,14 +68,12 @@ def frame_prepare_tinygrad(input_frame, M_inv, M_inv_uv, W=1928, H=1208):
 def update_img_input_tinygrad(tensor, frame, M_inv, M_inv_uv):
   tensor[:,:6] = tensor[:,-6:]
   tensor[:,-6:] = frame_prepare_tinygrad(frame, M_inv, M_inv_uv)
-  return Tensor.cat(tensor[:,:6], tensor[:,-6:], dim=1)
+  return tensor, Tensor.cat(tensor[:,:6], tensor[:,-6:], dim=1)
 
 def update_both_imgs_tinygrad(args1, args2):
-  img1 = update_img_input_tinygrad(*args1)
-  img2 = update_img_input_tinygrad(*args2)
-  return img1, img2
-
-
+  full1, pair1 = update_img_input_tinygrad(*args1)
+  full2, pair2 = update_img_input_tinygrad(*args2)
+  return (full1, pair1), (full2, pair2)
 
 def warp_perspective_cv2(src, M_inv, dst_shape, interpolation=cv2.INTER_LINEAR):
   w_dst, h_dst = dst_shape
@@ -106,7 +105,7 @@ def frame_prepare_cv2(input_frame, M_inv, M_inv_uv, W=1928, H=1208):
 def update_img_input_cv2(tensor, frame, M_inv, M_inv_uv):
   tensor[:, :6]  = tensor[:, -6:]
   tensor[:, -6:] = frame_prepare_cv2(frame, M_inv, M_inv_uv)
-  return np.concatenate([tensor[:, :6], tensor[:, -6:]], axis=1)
+  return tensor, np.concatenate([tensor[:, :6], tensor[:, -6:]], axis=1)
 
 def update_both_imgs_cv2(args1, args2):
   return (update_img_input_cv2(*args1),
@@ -133,7 +132,7 @@ def run_and_save_pickle(path):
     Device.default.synchronize()
     et = time.perf_counter()
     out_np = update_both_imgs_cv2(inputs1_np, inputs2_np)
-    #np.testing.assert_allclose(out_np[0], out[0].numpy())
+    #np.testing.assert_allclose(out_np[0][0], out[0][0].numpy())
     #np.testing.assert_allclose(out_np[1], out[1].numpy())
     step_times.append((et-st)*1e3)
     print(f"enqueue {(mt-st)*1e3:6.2f} ms -- total run {step_times[-1]:6.2f} ms")
