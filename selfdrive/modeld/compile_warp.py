@@ -66,9 +66,8 @@ def frame_prepare_tinygrad(input_frame, M_inv, M_inv_uv, W=1928, H=1208):
   return tensor
 
 def update_img_input_tinygrad(tensor, frame, M_inv, M_inv_uv):
-  tensor[:,:6] = tensor[:,-6:]
-  tensor[:,-6:] = frame_prepare_tinygrad(frame, M_inv, M_inv_uv)
-  return tensor, Tensor.cat(tensor[:,:6], tensor[:,-6:], dim=1)
+  tensor_out = Tensor.cat(tensor[:,6:], frame_prepare_tinygrad(frame, M_inv, M_inv_uv), dim=1)
+  return tensor_out, Tensor.cat(tensor_out[:,:6], tensor_out[:,-6:], dim=1)
 
 def update_both_imgs_tinygrad(args1, args2):
   full1, pair1 = update_img_input_tinygrad(*args1)
@@ -81,31 +80,32 @@ def warp_perspective_cv2(src, M_inv, dst_shape, interpolation=cv2.INTER_LINEAR):
                              flags=interpolation, borderMode=cv2.BORDER_REPLICATE)
 
 def frames_to_tensor_np(frames):
-  H = (frames.shape[1]*2)//3
-  W = frames.shape[2]
-  p1 = frames[:, 0:H:2, 0::2]
-  p2 = frames[:, 1:H:2, 0::2]
-  p3 = frames[:, 0:H:2, 1::2]
-  p4 = frames[:, 1:H:2, 1::2]
-  p5 = frames[:, H:H+H//4].reshape((-1, H//2, W//2))
-  p6 = frames[:, H+H//4:H+H//2].reshape((-1, H//2, W//2))
-  return np.concatenate([p1, p2, p3, p4, p5, p6], axis=1)\
-           .reshape((frames.shape[0], 6, H//2, W//2))
+  H = (frames.shape[0]*2)//3
+  W = frames.shape[1]
+  p1 = frames[0:H:2, 0::2]
+  p2 = frames[1:H:2, 0::2]
+  p3 = frames[0:H:2, 1::2]
+  p4 = frames[1:H:2, 1::2]
+  p5 = frames[H:H+H//4].reshape((H//2, W//2))
+  p6 = frames[H+H//4:H+H//2].reshape((H//2, W//2))
+  return np.concatenate([p1, p2, p3, p4, p5, p6], axis=0)\
+           .reshape((6, H//2, W//2))
 
 def frame_prepare_cv2(input_frame, M_inv, M_inv_uv, W=1928, H=1208):
   y  = warp_perspective_cv2(input_frame[:H*W].reshape(H, W),
-                                 M_inv, (MODEL_WIDTH, MODEL_HEIGHT)).ravel()
+                                 np.linalg.inv(M_inv), (MODEL_WIDTH, MODEL_HEIGHT)).ravel()
   u  = warp_perspective_cv2(input_frame[H*W::2].reshape(H//2, W//2),
-                                 M_inv_uv, (MODEL_WIDTH//2, MODEL_HEIGHT//2)).ravel()
+                                 np.linalg.inv(M_inv_uv), (MODEL_WIDTH//2, MODEL_HEIGHT//2)).ravel()
   v  = warp_perspective_cv2(input_frame[H*W+1::2].reshape(H//2, W//2),
-                                 M_inv_uv, (MODEL_WIDTH//2, MODEL_HEIGHT//2)).ravel()
-  yuv = np.concatenate([y, u, v]).reshape(1, MODEL_HEIGHT*3//2, MODEL_WIDTH)
+                                 np.linalg.inv(M_inv_uv), (MODEL_WIDTH//2, MODEL_HEIGHT//2)).ravel()
+  yuv = np.concatenate([y, u, v]).reshape( MODEL_HEIGHT*3//2, MODEL_WIDTH)
   return frames_to_tensor_np(yuv)
 
 def update_img_input_cv2(tensor, frame, M_inv, M_inv_uv):
-  tensor[:, :6]  = tensor[:, -6:]
-  tensor[:, -6:] = frame_prepare_cv2(frame, M_inv, M_inv_uv)
-  return tensor, np.concatenate([tensor[:, :6], tensor[:, -6:]], axis=1)
+  tensor[:-6]  = tensor[6:]
+  new_tensor = frame_prepare_cv2(frame, M_inv, M_inv_uv)
+  tensor[-6:] = new_tensor 
+  return tensor, np.concatenate([tensor[:6], tensor[-6:]], axis=0)
 
 def update_both_imgs_cv2(args1, args2):
   return (update_img_input_cv2(*args1),
@@ -117,21 +117,39 @@ def run_and_save_pickle(path):
   from tinygrad.engine.jit import TinyJit
   from tinygrad.device import Device
   update_img_jit = TinyJit(update_both_imgs_tinygrad, prune=True)
+  #update_img_jit = update_both_imgs_tinygrad
 
   # run 20 times
   step_times = []
+  tensor1 = Tensor.zeros((1, 30, 128, 256), dtype='uint8').contiguous().realize()
+  tensor2 = Tensor.zeros((1, 30, 128, 256), dtype='uint8').contiguous().realize()
+  tensor1_np = tensor1.numpy()
+  tensor2_np = tensor2.numpy()
   for _ in range(20):
-    inputs1 = [Tensor.randn((1, 30, 128, 256), dtype='uint8').realize(), Tensor.randn(1928*1208*3//2, dtype='uint8').realize(), Tensor.randn(3,3).realize(), Tensor.randn(3,3).realize()]
-    inputs2 = [Tensor.randn((1, 30, 128, 256), dtype='uint8').realize(), Tensor.randn(1928*1208*3//2, dtype='uint8').realize(), Tensor.randn(3,3).realize(), Tensor.randn(3,3).realize()]
-    Device.default.synchronize()
+    inputs1 = [(32*Tensor.randn(1, 30, 128, 256) + 128).cast(dtype='uint8').realize(), (32*Tensor.randn(1928*1208*3//2) + 128).cast(dtype='uint8').realize(), Tensor.randn(3,3).realize(), Tensor.randn(3,3).realize()]
+    inputs2 = [(32*Tensor.randn(1, 30, 128, 256) + 128).cast(dtype='uint8').realize(), (32*Tensor.randn(1928*1208*3//2) + 128).cast(dtype='uint8').realize(), Tensor.randn(3,3).realize(), Tensor.randn(3,3).realize()]
+    #print(inputs2[1].numpy()[:5])
+    #Device.default.synchronize()
     inputs1_np = [x.numpy() for x in inputs1]
+    #inputs1_np[0] = tensor1_np
     inputs2_np = [x.numpy() for x in inputs2]
+    #inputs2_np[0] = tensor2_np
     st = time.perf_counter()
     out = update_img_jit(inputs1, inputs2)
+    tensor1 = out[0][0]
+    tensor2 = out[1][0]
     mt = time.perf_counter()
     Device.default.synchronize()
     et = time.perf_counter()
     out_np = update_both_imgs_cv2(inputs1_np, inputs2_np)
+
+    tensor1_np = out_np[0][0]
+    tensor2_np = out_np[1][0]
+    print(out_np[0][0][0,:,0,0])
+    print(out[0][0].numpy()[0,:,0,0])
+    
+    #    print(out[0][1].numpy()[0,-1,:2,:2])
+
     #np.testing.assert_allclose(out_np[0][0], out[0][0].numpy())
     #np.testing.assert_allclose(out_np[1], out[1].numpy())
     step_times.append((et-st)*1e3)
