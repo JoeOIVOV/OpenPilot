@@ -2,7 +2,6 @@
 from pathlib import Path
 import time
 from tinygrad.tensor import Tensor
-import cv2
 import numpy as np
 
 
@@ -47,37 +46,79 @@ def warp_perspective_tinygrad(src, M_inv, dst_shape):
   return dst.reshape(h_dst, w_dst)
 
 def frames_to_tensor(frames):
-  H = (frames.shape[1]*2)//3
-  W = frames.shape[2]
-  in_img1 = Tensor.cat(frames[:, 0:H:2, 0::2],
-                        frames[:, 1:H:2, 0::2],
-                        frames[:, 0:H:2, 1::2],
-                        frames[:, 1:H:2, 1::2],
-                        frames[:, H:H+H//4].reshape((-1, H//2,W//2)),
-                        frames[:, H+H//4:H+H//2].reshape((-1, H//2,W//2)), dim=1).reshape((frames.shape[0], 6, H//2, W//2))
+  H = (frames.shape[0]*2)//3
+  W = frames.shape[1]
+  in_img1 = Tensor.cat(frames[0:H:2, 0::2],
+                        frames[1:H:2, 0::2],
+                        frames[0:H:2, 1::2],
+                        frames[1:H:2, 1::2],
+                        frames[H:H+H//4].reshape((H//2,W//2)),
+                        frames[H+H//4:H+H//2].reshape((H//2,W//2)), dim=1).reshape((6, H//2, W//2))
   return in_img1
 
 def frame_prepare_tinygrad(input_frame, M_inv, M_inv_uv, W=1928, H=1208):
   y = warp_perspective_tinygrad(input_frame[:H*W].reshape((H,W)), M_inv, (MODEL_WIDTH, MODEL_HEIGHT)).flatten()
   u = warp_perspective_tinygrad(input_frame[H*W::2].reshape((H//2,W//2)), M_inv_uv, (MODEL_WIDTH//2, MODEL_HEIGHT//2)).flatten()
   v = warp_perspective_tinygrad(input_frame[H*W+1::2].reshape((H//2,W//2)), M_inv_uv, (MODEL_WIDTH//2, MODEL_HEIGHT//2)).flatten()
-  yuv = y.cat(u).cat(v).reshape((1,MODEL_HEIGHT*3//2,MODEL_WIDTH))
+  yuv = y.cat(u).cat(v).reshape((MODEL_HEIGHT*3//2,MODEL_WIDTH))
   tensor = frames_to_tensor(yuv)
   return tensor
 
 def update_img_input_tinygrad(tensor, frame, M_inv, M_inv_uv):
-  tensor_out = Tensor.cat(tensor[:,6:], frame_prepare_tinygrad(frame, M_inv, M_inv_uv), dim=1)
-  return tensor_out, Tensor.cat(tensor_out[:,:6], tensor_out[:,-6:], dim=1)
+  tensor_out = Tensor.cat(tensor[6:], frame_prepare_tinygrad(frame, M_inv, M_inv_uv), dim=0)
+  return tensor_out, Tensor.cat(tensor_out[:6], tensor_out[-6:], dim=0)
 
 def update_both_imgs_tinygrad(args1, args2):
   full1, pair1 = update_img_input_tinygrad(*args1)
   full2, pair2 = update_img_input_tinygrad(*args2)
   return (full1, pair1), (full2, pair2)
 
-def warp_perspective_cv2(src, M_inv, dst_shape, interpolation=cv2.INTER_LINEAR):
-  w_dst, h_dst = dst_shape
-  return cv2.warpPerspective(src, M_inv, (w_dst, h_dst),
-                             flags=interpolation, borderMode=cv2.BORDER_REPLICATE)
+import numpy as np
+
+def warp_perspective_numpy(src, M, dst_shape):
+    w_dst, h_dst = dst_shape
+    h_src, w_src = src.shape[:2]
+
+    # Inverse mapping: destination -> source
+    M_inv = np.linalg.inv(M)
+
+    # Create homogeneous grid of (x, y, 1) coordinates in destination image
+    xs, ys = np.meshgrid(np.arange(w_dst), np.arange(h_dst))  # shapes (h_dst, w_dst)
+    ones = np.ones_like(xs)
+
+    dst_hom = np.stack([xs, ys, ones], axis=0).reshape(3, -1)  # (3, N)
+
+    # Map to source
+    src_hom = M_inv @ dst_hom  # (3, N)
+    src_hom /= src_hom[2:3, :]  # divide by last row (broadcast)
+
+    x_src = src_hom[0, :]
+    y_src = src_hom[1, :]
+
+    # Nearest-neighbor sampling
+    x_nn = np.round(x_src).astype(int)
+    y_nn = np.round(y_src).astype(int)
+
+    # Output buffer
+    if src.ndim == 2:
+        dst = np.zeros((h_dst, w_dst), dtype=src.dtype)
+    else:
+        dst = np.zeros((h_dst, w_dst, src.shape[2]), dtype=src.dtype)
+
+    # Keep only coordinates that fall inside the source image
+    valid = (
+        (x_nn >= 0) & (x_nn < w_src) &
+        (y_nn >= 0) & (y_nn < h_src)
+    )
+
+    dst_x = xs.reshape(-1)[valid]
+    dst_y = ys.reshape(-1)[valid]
+    src_x = x_nn[valid]
+    src_y = y_nn[valid]
+
+    dst[dst_y, dst_x] = src[src_y, src_x]
+
+    return dst
 
 def frames_to_tensor_np(frames):
   H = (frames.shape[0]*2)//3
@@ -91,25 +132,25 @@ def frames_to_tensor_np(frames):
   return np.concatenate([p1, p2, p3, p4, p5, p6], axis=0)\
            .reshape((6, H//2, W//2))
 
-def frame_prepare_cv2(input_frame, M_inv, M_inv_uv, W=1928, H=1208):
-  y  = warp_perspective_cv2(input_frame[:H*W].reshape(H, W),
+def frame_prepare_np(input_frame, M_inv, M_inv_uv, W=1928, H=1208):
+  y  = warp_perspective_numpy(input_frame[:H*W].reshape(H, W),
                                  np.linalg.inv(M_inv), (MODEL_WIDTH, MODEL_HEIGHT)).ravel()
-  u  = warp_perspective_cv2(input_frame[H*W::2].reshape(H//2, W//2),
+  u  = warp_perspective_numpy(input_frame[H*W::2].reshape(H//2, W//2),
                                  np.linalg.inv(M_inv_uv), (MODEL_WIDTH//2, MODEL_HEIGHT//2)).ravel()
-  v  = warp_perspective_cv2(input_frame[H*W+1::2].reshape(H//2, W//2),
+  v  = warp_perspective_numpy(input_frame[H*W+1::2].reshape(H//2, W//2),
                                  np.linalg.inv(M_inv_uv), (MODEL_WIDTH//2, MODEL_HEIGHT//2)).ravel()
   yuv = np.concatenate([y, u, v]).reshape( MODEL_HEIGHT*3//2, MODEL_WIDTH)
   return frames_to_tensor_np(yuv)
 
-def update_img_input_cv2(tensor, frame, M_inv, M_inv_uv):
+def update_img_input_np(tensor, frame, M_inv, M_inv_uv):
   tensor[:-6]  = tensor[6:]
-  new_tensor = frame_prepare_cv2(frame, M_inv, M_inv_uv)
+  new_tensor = frame_prepare_np(frame, M_inv, M_inv_uv)
   tensor[-6:] = new_tensor 
   return tensor, np.concatenate([tensor[:6], tensor[-6:]], axis=0)
 
-def update_both_imgs_cv2(args1, args2):
-  return (update_img_input_cv2(*args1),
-          update_img_input_cv2(*args2))
+def update_both_imgs_np(args1, args2):
+  return (update_img_input_np(*args1),
+          update_img_input_np(*args2))
 
 
 
@@ -121,13 +162,13 @@ def run_and_save_pickle(path):
 
   # run 20 times
   step_times = []
-  tensor1 = Tensor.zeros((1, 30, 128, 256), dtype='uint8').contiguous().realize()
-  tensor2 = Tensor.zeros((1, 30, 128, 256), dtype='uint8').contiguous().realize()
+  tensor1 = Tensor.zeros((30, 128, 256), dtype='uint8').contiguous().realize()
+  tensor2 = Tensor.zeros((30, 128, 256), dtype='uint8').contiguous().realize()
   tensor1_np = tensor1.numpy()
   tensor2_np = tensor2.numpy()
   for _ in range(20):
-    inputs1 = [(32*Tensor.randn(1, 30, 128, 256) + 128).cast(dtype='uint8').realize(), (32*Tensor.randn(1928*1208*3//2) + 128).cast(dtype='uint8').realize(), Tensor.randn(3,3).realize(), Tensor.randn(3,3).realize()]
-    inputs2 = [(32*Tensor.randn(1, 30, 128, 256) + 128).cast(dtype='uint8').realize(), (32*Tensor.randn(1928*1208*3//2) + 128).cast(dtype='uint8').realize(), Tensor.randn(3,3).realize(), Tensor.randn(3,3).realize()]
+    inputs1 = [(32*Tensor.randn(30, 128, 256) + 128).cast(dtype='uint8').realize(), (32*Tensor.randn(1928*1208*3//2) + 128).cast(dtype='uint8').realize(), Tensor.randn(3,3).realize(), Tensor.randn(3,3).realize()]
+    inputs2 = [(32*Tensor.randn(30, 128, 256) + 128).cast(dtype='uint8').realize(), (32*Tensor.randn(1928*1208*3//2) + 128).cast(dtype='uint8').realize(), Tensor.randn(3,3).realize(), Tensor.randn(3,3).realize()]
     #print(inputs2[1].numpy()[:5])
     #Device.default.synchronize()
     inputs1_np = [x.numpy() for x in inputs1]
@@ -141,12 +182,12 @@ def run_and_save_pickle(path):
     mt = time.perf_counter()
     Device.default.synchronize()
     et = time.perf_counter()
-    out_np = update_both_imgs_cv2(inputs1_np, inputs2_np)
+    out_np = update_both_imgs_np(inputs1_np, inputs2_np)
 
     tensor1_np = out_np[0][0]
     tensor2_np = out_np[1][0]
-    print(out_np[0][0][0,:,0,0])
-    print(out[0][0].numpy()[0,:,0,0])
+    print(out_np[0][0][:,0,0])
+    print(out[0][0].numpy()[:,0,0])
     
     #    print(out[0][1].numpy()[0,-1,:2,:2])
 

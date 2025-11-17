@@ -33,7 +33,7 @@ from openpilot.selfdrive.modeld.models.commonmodel_pyx import DrivingModelFrame,
 from openpilot.selfdrive.modeld.runners.tinygrad_helpers import qcom_tensor_from_opencl_address
 
 
-from openpilot.selfdrive.modeld.compile_warp import update_both_imgs_cv2
+from openpilot.selfdrive.modeld.compile_warp import update_both_imgs_np
 
 from tinygrad.tensor import Tensor
 import ctypes, array
