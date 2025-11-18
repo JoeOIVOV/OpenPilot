@@ -247,7 +247,7 @@ class ModelState:
         new_frames[key] = Tensor(new_frames[key], dtype='uint8').realize()
     out = self.update_imgs(self.full_img_input['img'], new_frames['img'], transforms['img'],
                            self.full_img_input['big_img'], new_frames['big_img'], transforms['big_img'])
-    self.full_img_input['img'], self.full_img_input['big_img'], = out[0], out[2]
+    #self.full_img_input['img'], self.full_img_input['big_img'], = out[0], out[2]
     vision_inputs['img'], vision_inputs['big_img'] = out[1][None,:,:,:], out[3][None,:,:,:]
     Device.default.synchronize()
     t1 = time.perf_counter()
