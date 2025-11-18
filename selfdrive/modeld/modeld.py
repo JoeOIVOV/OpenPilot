@@ -240,15 +240,17 @@ class ModelState:
     for key in bufs.keys():
       # Why is key referenced twice here?
       new_frames[key] = self.frames[key].array_from_vision_buf(bufs[key])
-    t0 = time.perf_counter()
     if TG_TRANSFORM:
       for key in bufs.keys():
         transforms[key] = Tensor(transforms[key].reshape(3,3), dtype=dtypes.float32).realize()
         new_frames[key] = Tensor(new_frames[key], dtype='uint8').realize()
+    Device.default.synchronize()
+
+    t0 = time.perf_counter()
     out = self.update_imgs(self.full_img_input['img'], new_frames['img'], transforms['img'],
                            self.full_img_input['big_img'], new_frames['big_img'], transforms['big_img'])
-    #self.full_img_input['img'], self.full_img_input['big_img'], = out[0], out[2]
-    vision_inputs['img'], vision_inputs['big_img'] = out[1][None,:,:,:], out[3][None,:,:,:]
+    self.full_img_input['img'], self.full_img_input['big_img'], = out[0].realize(), out[2].realize()
+    vision_inputs['img'], vision_inputs['big_img'] = out[1][None,:,:,:].realize(), out[3][None,:,:,:].realize()
     Device.default.synchronize()
     t1 = time.perf_counter()
     print(f"update_img_jit took {(t1 - t0) * 1000:.2f} ms")
