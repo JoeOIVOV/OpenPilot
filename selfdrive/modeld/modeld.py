@@ -41,7 +41,7 @@ from tinygrad.device import Device
 Tensor.manual_seed(1337)
 Tensor.no_grad = True
 
-TG_TRANSFORM = False
+TG_TRANSFORM = True
 PROCESS_NAME = "selfdrive.modeld.modeld"
 SEND_RAW_PRED = os.getenv('SEND_RAW_PRED')
 
