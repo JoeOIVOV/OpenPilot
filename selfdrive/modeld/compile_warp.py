@@ -83,7 +83,7 @@ def warp_perspective_numpy(src, M_inv, dst_shape):
     ones = np.ones_like(xs)
     dst_hom = np.stack([xs, ys, ones], axis=0).reshape(3, -1)
 
-    src_hom = M_inv @ dst_hom 
+    src_hom = M_inv @ dst_hom
     src_hom /= src_hom[2:3, :]
 
     src_x = np.clip(np.round(src_hom[0, :]).astype(int), 0, w_src - 1)
@@ -149,8 +149,8 @@ def run_and_save_pickle(path):
     inputs_np[3] = big_full_buffer_np
     st = time.perf_counter()
     out = update_img_jit(*inputs)
-    #full_buffer = out[0].realize()
-    #big_full_buffer = out[2].realize()
+    full_buffer = out[0].realize()
+    big_full_buffer = out[2].realize()
     mt = time.perf_counter()
     Device.default.synchronize()
     et = time.perf_counter()
@@ -160,11 +160,11 @@ def run_and_save_pickle(path):
     full_buffer_np = out_np[0]
     big_full_buffer_np = out_np[2]
 
-    #for a, b in zip(out_np, (x.numpy() for x in out)):
-    #  mismatch = np.abs(a - b) > 0
-    #  mismatch_percent = sum(mismatch.flatten()) / len(mismatch.flatten()) * 100
-    #  mismatch_percent_tol = 1e-2
-    #  assert mismatch_percent < mismatch_percent_tol, f"input mismatch percent {mismatch_percent} exceeds tolerance {mismatch_percent_tol}"
+    for a, b in zip(out_np, (x.numpy() for x in out)):
+      mismatch = np.abs(a - b) > 0
+      mismatch_percent = sum(mismatch.flatten()) / len(mismatch.flatten()) * 100
+      mismatch_percent_tol = 1e-2
+      assert mismatch_percent < mismatch_percent_tol, f"input mismatch percent {mismatch_percent} exceeds tolerance {mismatch_percent_tol}"
 
 
   import pickle
