@@ -62,8 +62,8 @@ def frame_prepare_tinygrad(input_frame, M_inv):
 
 def update_img_input_tinygrad(tensor, frame, M_inv):
   new_img = frame_prepare_tinygrad(frame, M_inv)
-  full_buffer = tensor[6:].cat(new_img, dim=0)
-  return full_buffer.contiguous().clone(), Tensor.cat(full_buffer[:6], full_buffer[-6:], dim=0).contiguous()
+  full_buffer = tensor[6:].cat(new_img, dim=0).contiguous()
+  return full_buffer, Tensor.cat(full_buffer[:6], full_buffer[-6:], dim=0).contiguous()
 
 def update_both_imgs_tinygrad(calib_img_buffer, new_img, M_inv,
                               calib_big_img_buffer, new_big_img, M_inv_big):
@@ -149,8 +149,8 @@ def run_and_save_pickle(path):
     inputs_np[3] = big_full_buffer_np
     st = time.perf_counter()
     out = update_img_jit(*inputs)
-    full_buffer = out[0].realize()
-    big_full_buffer = out[2].realize()
+    full_buffer = out[0].contiguous().realize().clone()
+    big_full_buffer = out[2].contiguous().realize().clone()
     mt = time.perf_counter()
     Device.default.synchronize()
     et = time.perf_counter()
@@ -170,6 +170,10 @@ def run_and_save_pickle(path):
   import pickle
   with open(path, "wb") as f:
     pickle.dump(update_img_jit, f)
+
+  jit = pickle.load(open(path, "rb"))
+  # test function after loading
+  out1 = jit(*inputs)
 
 if __name__ == "__main__":
     run_and_save_pickle(WARP_PKL_PATH)
