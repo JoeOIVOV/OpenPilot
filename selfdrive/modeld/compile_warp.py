@@ -2,6 +2,7 @@
 from pathlib import Path
 import time
 from tinygrad.tensor import Tensor
+from tinygrad.helpers import Context
 import numpy as np
 
 
@@ -17,30 +18,21 @@ UV_SCALE_MATRIX = np.array([[0.5, 0, 0], [0, 0.5, 0], [0, 0, 1]], dtype=np.float
 UV_SCALE_MATRIX_INV = np.linalg.inv(UV_SCALE_MATRIX)
 
 
-def tensor_arange(end):
-    return Tensor([float(i) for i in range(end)])
-
-def tensor_round(tensor):
-    return (tensor + 0.5).floor()
-
 def warp_perspective_tinygrad(src, M_inv, dst_shape):
   w_dst, h_dst = dst_shape
   h_src, w_src = src.shape
 
-  x = tensor_arange(w_dst).reshape(1, w_dst).expand(h_dst, w_dst)
-  y = tensor_arange(h_dst).reshape(h_dst, 1).expand(h_dst, w_dst)
+  x = Tensor.arange(w_dst).reshape(1, w_dst).expand(h_dst, w_dst)
+  y = Tensor.arange(h_dst).reshape(h_dst, 1).expand(h_dst, w_dst)
   ones = Tensor.ones_like(x)
   dst_coords = x.reshape(1, -1).cat(y.reshape(1, -1)).cat(ones.reshape(1, -1))
 
   src_coords = M_inv @ dst_coords
   src_coords = src_coords / src_coords[2:3, :]
-  x_src = src_coords[0].reshape(h_dst, w_dst)
-  y_src = src_coords[1].reshape(h_dst, w_dst)
 
-  x_nn_clipped = tensor_round(x_src).clip(0, w_src - 1).cast('int')
-  y_nn_clipped = tensor_round(y_src).clip(0, h_src - 1).cast('int')
-
-  idx = (y_nn_clipped * w_src + x_nn_clipped).reshape(-1)
+  x_nn_clipped = Tensor.round(src_coords[0]).clip(0, w_src - 1).cast('int')
+  y_nn_clipped = Tensor.round(src_coords[1]).clip(0, h_src - 1).cast('int')
+  idx = (y_nn_clipped * w_src + x_nn_clipped)
 
   src_flat = src.reshape(h_src * w_src)
   sampled = src_flat[idx]
@@ -60,9 +52,10 @@ def frames_to_tensor(frames):
 def frame_prepare_tinygrad(input_frame, M_inv):
   tg_scale = Tensor(UV_SCALE_MATRIX)
   M_inv_uv = tg_scale @ M_inv @ Tensor(UV_SCALE_MATRIX_INV)
-  y = warp_perspective_tinygrad(input_frame[:H*W].reshape((H,W)), M_inv, (MODEL_WIDTH, MODEL_HEIGHT))
-  u = warp_perspective_tinygrad(input_frame[H*W::2].reshape((H//2,W//2)), M_inv_uv, (MODEL_WIDTH//2, MODEL_HEIGHT//2))
-  v = warp_perspective_tinygrad(input_frame[H*W+1::2].reshape((H//2,W//2)), M_inv_uv, (MODEL_WIDTH//2, MODEL_HEIGHT//2))
+  with Context(SPLIT_REDUCEOP=0):
+    y = warp_perspective_tinygrad(input_frame[:H*W].reshape((H,W)), M_inv, (MODEL_WIDTH, MODEL_HEIGHT)).realize()
+    u = warp_perspective_tinygrad(input_frame[H*W::2].reshape((H//2,W//2)), M_inv_uv, (MODEL_WIDTH//2, MODEL_HEIGHT//2)).realize()
+    v = warp_perspective_tinygrad(input_frame[H*W+1::2].reshape((H//2,W//2)), M_inv_uv, (MODEL_WIDTH//2, MODEL_HEIGHT//2)).realize()
   yuv = y.cat(u).cat(v).reshape((MODEL_HEIGHT*3//2,MODEL_WIDTH))
   tensor = frames_to_tensor(yuv)
   return tensor
