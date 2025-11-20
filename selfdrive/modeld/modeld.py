@@ -183,7 +183,7 @@ class ModelState:
     self.full_img_input = {'img': Tensor.zeros(IMG_INPUT_SHAPE, dtype='uint8').contiguous().realize(),
                            'big_img': Tensor.zeros(IMG_INPUT_SHAPE, dtype='uint8').contiguous().realize(),}
     self.transforms_np = {'img': np.zeros((3,3), dtype=np.float32), 'big_img': np.eye(3, dtype=np.float32)}
-    self.transforms = {k: Tensor(v, device='NPY').realize() for k, v in self.transforms_np}
+    self.transforms = {k: Tensor(v, device='NPY').realize() for k, v in self.transforms_np.items()}
     self.vision_output = np.zeros(vision_output_size, dtype=np.float32)
     self.policy_inputs = {k: Tensor(v, device='NPY').realize() for k,v in self.numpy_inputs.items()}
     self.policy_output = np.zeros(policy_output_size, dtype=np.float32)
