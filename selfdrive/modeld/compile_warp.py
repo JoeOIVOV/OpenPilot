@@ -63,6 +63,7 @@ def frame_prepare_tinygrad(input_frame, M_inv):
   return tensor
 
 def update_img_input_tinygrad(tensor, frame, M_inv):
+  frame = frame.flatten()
   M_inv = M_inv.to(Device.DEFAULT)
   new_img = frame_prepare_tinygrad(frame, M_inv)
   full_buffer = tensor[6:].cat(new_img, dim=0).contiguous()
@@ -107,6 +108,7 @@ def frames_to_tensor_np(frames):
            .reshape((6, H//2, W//2))
 
 def frame_prepare_np(input_frame, M_inv):
+  input_frame = input_frame.flatten()
   M_inv_uv = UV_SCALE_MATRIX @ M_inv @ UV_SCALE_MATRIX_INV
   y  = warp_perspective_numpy(input_frame[:H*W].reshape(H, W),
                                  M_inv, (MODEL_WIDTH, MODEL_HEIGHT))
@@ -140,12 +142,12 @@ def run_and_save_pickle(path):
 
   # run 20 times
   step_times = []
-  for _ in range(20):
+  for _ in range(4):
     img_inputs = [full_buffer,
-                  (32*Tensor.randn(W*H*3//2) + 128).cast(dtype='uint8').realize(),
+                  (32*Tensor.randn(H*3//2,W) + 128).cast(dtype='uint8').realize(),
                   Tensor(Tensor.randn(3,3).mul(8).realize().numpy(), device='NPY')]
     big_img_inputs = [big_full_buffer,
-                      (32*Tensor.randn(W*H*3//2) + 128).cast(dtype='uint8').realize(),
+                      (32*Tensor.randn(H*3//2,W) + 128).cast(dtype='uint8').realize(),
                       Tensor(Tensor.randn(3,3).mul(8).realize().numpy(), device='NPY')]
     inputs = img_inputs + big_img_inputs
     Device.default.synchronize()

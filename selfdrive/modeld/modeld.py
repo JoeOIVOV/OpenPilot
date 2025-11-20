@@ -187,7 +187,7 @@ class ModelState:
 
     with open(POLICY_PKL_PATH, "rb") as f:
       self.policy_run = pickle.load(f)
-  
+
     with open(WARP_PKL_PATH, "rb") as f:
       self.update_imgs = pickle.load(f)
 
@@ -206,14 +206,13 @@ class ModelState:
     new_frames = {}
     for key in bufs.keys():
       if TICI and not USBGPU:
-        new_frames[key] = qcom_tensor_from_opencl_address(self.frames[key].cl_from_vision_buf(bufs[key]).mem_address, ((bufs[key].height * 3)//2,bufs[key].width), dtype=dtypes.uint8).reshape(-1)
+        new_frames[key] = qcom_tensor_from_opencl_address(self.frames[key].cl_from_vision_buf(bufs[key]).mem_address, ((bufs[key].height * 3)//2,bufs[key].width), dtype=dtypes.uint8)
       else:
         new_frames[key] = self.frames[key].array_from_vision_buf(bufs[key])
         new_frames[key] = Tensor(new_frames[key], dtype='uint8').realize()
+    t1 = time.perf_counter()
     for key in bufs.keys():
       self.transforms_np[key][:,:] = transforms[key][:,:]
-    t1 = time.perf_counter()
-    Device.default.synchronize()
     t2 = time.perf_counter()
 
     out = self.update_imgs(self.img_queues['img'], new_frames['img'], self.transforms['img'],
@@ -228,11 +227,11 @@ class ModelState:
 
     self.vision_output = self.vision_run(**vision_inputs).contiguous().realize().uop.base.buffer.numpy()
     t5 = time.perf_counter()
-    #print(f'img read took {1000*(t1-t0):.2f}ms')
-    #print(f'img sync took {1000*(t2-t1):.2f}ms')
-    #print(f'img warp took {1000*(t3-t2):.2f}ms')
-    #print(f'input prep took {1000*(t4-t3):.2f}ms')
-    #print(f'model run took {1000*(t5-t4):.2f}ms')
+    print(f'img read took {1000*(t1-t0):.2f}ms')
+    print(f'img sync took {1000*(t2-t1):.2f}ms')
+    print(f'img warp took {1000*(t3-t2):.2f}ms')
+    print(f'input prep took {1000*(t4-t3):.2f}ms')
+    print(f'model run took {1000*(t5-t4):.2f}ms')
     vision_outputs_dict = self.parser.parse_vision_outputs(self.slice_outputs(self.vision_output, self.vision_output_slices))
 
     self.full_input_queues.enqueue({'features_buffer': vision_outputs_dict['hidden_state'], 'desire_pulse': new_desire})
@@ -242,7 +241,7 @@ class ModelState:
 
     self.policy_output = self.policy_run(**self.policy_inputs).contiguous().realize().uop.base.buffer.numpy()
     policy_outputs_dict = self.parser.parse_policy_outputs(self.slice_outputs(self.policy_output, self.policy_output_slices))
-
+    print(policy_outputs_dict['plan'][0,0,3])
     combined_outputs_dict = {**vision_outputs_dict, **policy_outputs_dict}
     if SEND_RAW_PRED:
       combined_outputs_dict['raw_pred'] = np.concatenate([self.vision_output.copy(), self.policy_output.copy()])
