@@ -29,7 +29,7 @@ from openpilot.selfdrive.controls.lib.drive_helpers import get_accel_from_plan, 
 from openpilot.selfdrive.modeld.parse_model_outputs import Parser
 from openpilot.selfdrive.modeld.fill_model_msg import fill_model_msg, fill_pose_msg, PublishState
 from openpilot.selfdrive.modeld.constants import ModelConstants, Plan
-from openpilot.selfdrive.modeld.models.commonmodel_pyx import DrivingModelFrame, CLContext, cl_from_vision_buf
+from openpilot.selfdrive.modeld.models.commonmodel_pyx import DrivingModelFrame, CLContext, cl_from_visionbuf
 from openpilot.selfdrive.modeld.runners.tinygrad_helpers import qcom_tensor_from_opencl_address
 IMG_BUFFER_SHAPE = (30, 128, 256)
 
@@ -227,12 +227,13 @@ class ModelState:
     new_frames = {}
     for key in bufs.keys():
       if TICI and not USBGPU:
-        new_frames[key] = qcom_tensor_from_opencl_address(cl_from_vision_buf(bufs[key].mem_address), (bufs[key].w, bufs[key].h), dtype=dtypes.uint8)
+        new_frames[key] = qcom_tensor_from_opencl_address(self.frames[key].cl_from_vision_buf(bufs[key]).mem_address, ((bufs[key].height * 3)//2,bufs[key].width), dtype=dtypes.uint8).reshape(-1)
+        #print(new_frames[key][:100].numpy())
       else:
         new_frames[key] = self.frames[key].array_from_vision_buf(bufs[key])
+        new_frames[key] = Tensor(new_frames[key], dtype='uint8').realize()
     for key in bufs.keys():
       transforms[key] = Tensor(transforms[key].reshape(3,3), dtype=dtypes.float32).realize()
-      new_frames[key] = Tensor(new_frames[key], dtype='uint8').realize()
     Device.default.synchronize()
 
     t0 = time.perf_counter()
@@ -243,7 +244,7 @@ class ModelState:
     vision_inputs['img'], vision_inputs['big_img'] = out[1][None,:,:,:].realize(), out[3][None,:,:,:].realize()
     Device.default.synchronize()
     t1 = time.perf_counter()
-    print(f"update_img_jit took {(t1 - t0) * 1000:.2f} ms")
+    #print(f"update_img_jit took {(t1 - t0) * 1000:.2f} ms")
 
     if prepare_only:
       return None
@@ -258,7 +259,7 @@ class ModelState:
 
     self.policy_output = self.policy_run(**self.policy_inputs).contiguous().realize().uop.base.buffer.numpy()
     policy_outputs_dict = self.parser.parse_policy_outputs(self.slice_outputs(self.policy_output, self.policy_output_slices))
-    print(policy_outputs_dict['plan'][0,0,3])
+    #print(policy_outputs_dict['plan'][0,0,3])
 
     combined_outputs_dict = {**vision_outputs_dict, **policy_outputs_dict}
     if SEND_RAW_PRED:
