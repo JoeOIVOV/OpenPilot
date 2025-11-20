@@ -18,10 +18,8 @@
 
 class ModelFrame {
 public:
-  ModelFrame(cl_device_id device_id, cl_context context) {
-    q = CL_CHECK_ERR(clCreateCommandQueue(context, device_id, 0, &err));
-  }
-  virtual ~ModelFrame() {}
+  ModelFrame(cl_device_id device_id, cl_context context);
+  ~ModelFrame();
 
   int MODEL_WIDTH;
   int MODEL_HEIGHT;
@@ -64,7 +62,4 @@ public:
   const int MODEL_HEIGHT = 960;
   const int MODEL_FRAME_SIZE = MODEL_WIDTH * MODEL_HEIGHT;
   const int buf_size = MODEL_FRAME_SIZE;
-
-private:
-  cl_mem input_frame_cl;
 };

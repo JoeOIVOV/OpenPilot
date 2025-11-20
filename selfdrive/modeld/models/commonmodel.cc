@@ -6,6 +6,18 @@
 #include "common/clutil.h"
 
 
+ModelFrame::ModelFrame(cl_device_id device_id, cl_context context) {
+  q = CL_CHECK_ERR(clCreateCommandQueue(context, device_id, 0, &err));
+  full_input_frame = std::make_unique<uint8_t[]>(full_img_size);
+  single_frame_cl = CL_CHECK_ERR(clCreateBuffer(context, CL_MEM_READ_WRITE, full_img_size, NULL, &err));
+}
+
+
+ModelFrame::~ModelFrame() {
+  CL_CHECK(clReleaseMemObject(single_frame_cl));
+  CL_CHECK(clReleaseCommandQueue(q));
+}
+
 
 uint8_t* ModelFrame::array_from_vision_buf(cl_mem *vision_buf) {
   CL_CHECK(clEnqueueReadBuffer(q, *vision_buf, CL_TRUE, 0, full_img_size * sizeof(uint8_t), &full_input_frame[0], 0, nullptr, nullptr));
@@ -20,22 +32,14 @@ cl_mem* ModelFrame::cl_from_vision_buf(cl_mem *vision_buf) {
 }
   
 DrivingModelFrame::DrivingModelFrame(cl_device_id device_id, cl_context context, int _temporal_skip) : ModelFrame(device_id, context) {
-  full_input_frame = std::make_unique<uint8_t[]>(full_img_size);
-  single_frame_cl = CL_CHECK_ERR(clCreateBuffer(context, CL_MEM_READ_WRITE, full_img_size, NULL, &err));
 }
 
 DrivingModelFrame::~DrivingModelFrame() {
-  CL_CHECK(clReleaseMemObject(single_frame_cl));
-  CL_CHECK(clReleaseCommandQueue(q));
 }
 
 MonitoringModelFrame::MonitoringModelFrame(cl_device_id device_id, cl_context context) : ModelFrame(device_id, context) {
-  full_input_frame = std::make_unique<uint8_t[]>(full_img_size);
-  single_frame_cl = CL_CHECK_ERR(clCreateBuffer(context, CL_MEM_READ_WRITE, full_img_size, NULL, &err));
 }
 
 
 MonitoringModelFrame::~MonitoringModelFrame() {
-  CL_CHECK(clReleaseMemObject(input_frame_cl));
-  CL_CHECK(clReleaseCommandQueue(q));
 }
