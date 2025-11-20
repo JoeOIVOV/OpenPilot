@@ -173,8 +173,8 @@ class ModelState:
     self.full_input_queues.reset()
 
     # img buffers are managed in openCL transform code
-    self.img_queues = {'img': Tensor.zeros(IMG_BUFFER_SHAPE, dtype='uint8').contiguous().realize(),
-                           'big_img': Tensor.zeros(IMG_BUFFER_SHAPE, dtype='uint8').contiguous().realize(),}
+    self.img_queues = {'img': Tensor.zeros(IMG_QUEUE_SHAPE, dtype='uint8').contiguous().realize(),
+                           'big_img': Tensor.zeros(IMG_QUEUE_SHAPE, dtype='uint8').contiguous().realize(),}
     self.transforms_np = {'img': np.zeros((3,3), dtype=np.float32), 'big_img': np.eye(3, dtype=np.float32)}
     self.transforms = {k: Tensor(v, device='NPY').realize() for k, v in self.transforms_np.items()}
     self.vision_output = np.zeros(vision_output_size, dtype=np.float32)
