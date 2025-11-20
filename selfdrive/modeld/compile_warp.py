@@ -62,7 +62,7 @@ def frame_prepare_tinygrad(input_frame, M_inv):
   return tensor
 
 def update_img_input_tinygrad(tensor, frame, M_inv):
-  M_inv = M_inv.to(Device.DEFAULT) 
+  M_inv = M_inv.to(Device.DEFAULT)
   new_img = frame_prepare_tinygrad(frame, M_inv)
   full_buffer = tensor[6:].cat(new_img, dim=0).contiguous()
   return full_buffer, Tensor.cat(full_buffer[:6], full_buffer[-6:], dim=0).contiguous()
@@ -142,8 +142,12 @@ def run_and_save_pickle(path):
   # run 20 times
   step_times = []
   for _ in range(20):
-    img_inputs = [full_buffer, (32*Tensor.randn(W*H*3//2) + 128).cast(dtype='uint8').realize(), Tensor(Tensor.randn(3,3).mul(8).realize().numpy(), device='NPY')]
-    big_img_inputs = [big_full_buffer, (32*Tensor.randn(W*H*3//2) + 128).cast(dtype='uint8').realize(), Tensor(Tensor.randn(3,3).mul(8).realize().numpy(), device='NPY')]
+    img_inputs = [full_buffer,
+                  (32*Tensor.randn(W*H*3//2) + 128).cast(dtype='uint8').realize(),
+                  Tensor(Tensor.randn(3,3).mul(8).realize().numpy(), device='NPY')]
+    big_img_inputs = [big_full_buffer,
+                      (32*Tensor.randn(W*H*3//2) + 128).cast(dtype='uint8').realize(),
+                      Tensor(Tensor.randn(3,3).mul(8).realize().numpy(), device='NPY')]
     inputs = img_inputs + big_img_inputs
     Device.default.synchronize()
     inputs_np = [x.numpy() for x in inputs]
