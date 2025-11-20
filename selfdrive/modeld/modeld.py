@@ -182,6 +182,8 @@ class ModelState:
     # img buffers are managed in openCL transform code
     self.full_img_input = {'img': Tensor.zeros(IMG_INPUT_SHAPE, dtype='uint8').contiguous().realize(),
                            'big_img': Tensor.zeros(IMG_INPUT_SHAPE, dtype='uint8').contiguous().realize(),}
+    self.transforms_np = {'img': np.zeros((3,3), dtype=np.float32), 'big_img': np.eye(3, dtype=np.float32)}
+    self.transforms = {k: Tensor(v, device='NPY').realize() for k, v in self.transforms_np}
     self.vision_output = np.zeros(vision_output_size, dtype=np.float32)
     self.policy_inputs = {k: Tensor(v, device='NPY').realize() for k,v in self.numpy_inputs.items()}
     self.policy_output = np.zeros(policy_output_size, dtype=np.float32)
@@ -215,11 +217,11 @@ class ModelState:
         new_frames[key] = self.frames[key].array_from_vision_buf(bufs[key])
         new_frames[key] = Tensor(new_frames[key], dtype='uint8').realize()
     for key in bufs.keys():
-      transforms[key] = Tensor(transforms[key].reshape(3,3), dtype=dtypes.float32).realize()
+      self.transforms_np[key][:,:] = transforms[key][:,:]
     Device.default.synchronize()
 
-    out = self.update_imgs(self.full_img_input['img'], new_frames['img'], transforms['img'],
-                           self.full_img_input['big_img'], new_frames['big_img'], transforms['big_img'])
+    out = self.update_imgs(self.full_img_input['img'], new_frames['img'], self.transforms['img'],
+                           self.full_img_input['big_img'], new_frames['big_img'], self.transforms['big_img'])
     self.full_img_input['img'], self.full_img_input['big_img'], = out[0].realize(), out[2].realize()
     vision_inputs = {}
     vision_inputs['img'], vision_inputs['big_img'] = out[1][None,:,:,:].realize(), out[3][None,:,:,:].realize()
