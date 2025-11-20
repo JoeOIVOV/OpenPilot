@@ -35,6 +35,7 @@ public:
   int MODEL_FRAME_SIZE;
   int buf_size;
   uint8_t* array_from_vision_buf(cl_mem *vision_buf);
+  cl_mem* cl_from_vision_buf(cl_mem *vision_buf);
 
   // DONT HARDCODE THIS
   const int RAW_IMG_HEIGHT = 1208;

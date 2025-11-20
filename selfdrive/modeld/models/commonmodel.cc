@@ -45,6 +45,10 @@ uint8_t* ModelFrame::array_from_vision_buf(cl_mem *vision_buf) {
   return &full_input_frame[0];
 }
 
+cl_mem* ModelFrame::cl_from_vision_buf(cl_mem *vision_buf) {
+  return vision_buf;
+}
+
 
 DrivingModelFrame::~DrivingModelFrame() {
   deinit_transform();
