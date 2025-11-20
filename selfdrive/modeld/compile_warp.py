@@ -1,10 +1,10 @@
 #!/usr/bin/env python
-from pathlib import Path
 import time
+import pickle
+import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import Context
 from tinygrad.device import Device
-import numpy as np
 
 
 WARP_PKL_PATH = Path(__file__).parent / 'models/warp_tinygrad.pkl'
@@ -72,8 +72,6 @@ def update_both_imgs_tinygrad(calib_img_buffer, new_img, M_inv,
   calib_img_buffer, calib_img_pair = update_img_input_tinygrad(calib_img_buffer, new_img, M_inv)
   calib_big_img_buffer, calib_big_img_pair = update_img_input_tinygrad(calib_big_img_buffer, new_big_img, M_inv_big)
   return calib_img_buffer, calib_img_pair, calib_big_img_buffer, calib_big_img_pair
-
-import numpy as np
 
 def warp_perspective_numpy(src, M_inv, dst_shape):
     w_dst, h_dst = dst_shape
@@ -172,14 +170,12 @@ def run_and_save_pickle(path):
       mismatch_percent_tol = 1e-2
       assert mismatch_percent < mismatch_percent_tol, f"input mismatch percent {mismatch_percent} exceeds tolerance {mismatch_percent_tol}"
 
-
-  import pickle
   with open(path, "wb") as f:
     pickle.dump(update_img_jit, f)
 
   jit = pickle.load(open(path, "rb"))
   # test function after loading
-  out1 = jit(*inputs)
+  jit(*inputs)
 
 if __name__ == "__main__":
     run_and_save_pickle(WARP_PKL_PATH)
