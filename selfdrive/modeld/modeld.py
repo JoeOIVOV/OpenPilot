@@ -8,6 +8,7 @@ if USBGPU:
   os.environ['AMD_IFACE'] = 'USB'
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
+from tinygrad.device import Device
 import time
 import pickle
 import numpy as np
@@ -30,11 +31,6 @@ from openpilot.selfdrive.modeld.fill_model_msg import fill_model_msg, fill_pose_
 from openpilot.selfdrive.modeld.constants import ModelConstants, Plan
 from openpilot.selfdrive.modeld.models.commonmodel_pyx import DrivingModelFrame, CLContext
 from openpilot.selfdrive.modeld.runners.tinygrad_helpers import qcom_tensor_from_opencl_address
-IMG_BUFFER_SHAPE = (30, 128, 256)
-
-from tinygrad.tensor import Tensor
-from tinygrad.dtype import dtypes
-from tinygrad.device import Device
 
 Tensor.manual_seed(1337)
 Tensor.no_grad = True
@@ -53,7 +49,7 @@ LAT_SMOOTH_SECONDS = 0.1
 LONG_SMOOTH_SECONDS = 0.3
 MIN_LAT_CONTROL_SPEED = 0.3
 
-IMG_INPUT_SHAPE = (30, 128, 256)
+IMG_QUEUE_SHAPE = (30, 128, 256)
 
 
 def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.ModelDataV2.Action,
@@ -177,8 +173,8 @@ class ModelState:
     self.full_input_queues.reset()
 
     # img buffers are managed in openCL transform code
-    self.full_img_input = {'img': Tensor.zeros(IMG_INPUT_SHAPE, dtype='uint8').contiguous().realize(),
-                           'big_img': Tensor.zeros(IMG_INPUT_SHAPE, dtype='uint8').contiguous().realize(),}
+    self.img_queues = {'img': Tensor.zeros(IMG_BUFFER_SHAPE, dtype='uint8').contiguous().realize(),
+                           'big_img': Tensor.zeros(IMG_BUFFER_SHAPE, dtype='uint8').contiguous().realize(),}
     self.transforms_np = {'img': np.zeros((3,3), dtype=np.float32), 'big_img': np.eye(3, dtype=np.float32)}
     self.transforms = {k: Tensor(v, device='NPY').realize() for k, v in self.transforms_np.items()}
     self.vision_output = np.zeros(vision_output_size, dtype=np.float32)
