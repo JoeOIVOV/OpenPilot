@@ -67,6 +67,8 @@ DrivingModelFrame::~DrivingModelFrame() {
 MonitoringModelFrame::MonitoringModelFrame(cl_device_id device_id, cl_context context) : ModelFrame(device_id, context) {
   input_frames = std::make_unique<uint8_t[]>(buf_size);
   input_frame_cl = CL_CHECK_ERR(clCreateBuffer(context, CL_MEM_READ_WRITE, buf_size, NULL, &err));
+  full_input_frame = std::make_unique<uint8_t[]>(full_img_size);
+
 
   init_transform(device_id, context, MODEL_WIDTH, MODEL_HEIGHT);
 }

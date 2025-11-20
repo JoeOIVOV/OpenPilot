@@ -9,6 +9,7 @@ from tinygrad.device import Device
 
 
 WARP_PKL_PATH = Path(__file__).parent / 'models/warp_tinygrad.pkl'
+DM_WARP_PKL_PATH = Path(__file__).parent / 'models/dm_warp_tinygrad.pkl'
 
 MODEL_WIDTH = 512
 MODEL_HEIGHT = 256
@@ -130,7 +131,7 @@ def update_both_imgs_np(calib_img_buffer, new_img, M_inv,
   calib_big_img_buffer, calib_big_img_pair = update_img_input_np(calib_big_img_buffer, new_big_img, M_inv_big)
   return calib_img_buffer, calib_img_pair, calib_big_img_buffer, calib_big_img_pair
 
-def run_and_save_pickle(path):
+def run_and_save_pickle():
   from tinygrad.engine.jit import TinyJit
   from tinygrad.device import Device
   update_img_jit = TinyJit(update_both_imgs_tinygrad, prune=True)
@@ -140,9 +141,8 @@ def run_and_save_pickle(path):
   full_buffer_np = np.zeros(IMG_BUFFER_SHAPE, dtype=np.uint8)
   big_full_buffer_np = np.zeros(IMG_BUFFER_SHAPE, dtype=np.uint8)
 
-  # run 20 times
   step_times = []
-  for _ in range(4):
+  for _ in range(10):
     img_inputs = [full_buffer,
                   (32*Tensor.randn(H*3//2,W) + 128).cast(dtype='uint8').realize(),
                   Tensor(Tensor.randn(3,3).mul(8).realize().numpy(), device='NPY')]
@@ -173,12 +173,35 @@ def run_and_save_pickle(path):
       mismatch_percent_tol = 1e-2
       assert mismatch_percent < mismatch_percent_tol, f"input mismatch percent {mismatch_percent} exceeds tolerance {mismatch_percent_tol}"
 
-  with open(path, "wb") as f:
+  with open(WARP_PKL_PATH, "wb") as f:
     pickle.dump(update_img_jit, f)
 
-  jit = pickle.load(open(path, "rb"))
+  jit = pickle.load(open(WARP_PKL_PATH, "rb"))
   # test function after loading
   jit(*inputs)
 
+
+  def warp_dm(frame, M_inv):
+    frame = frame.reshape(H*3//2,W)
+    M_inv = M_inv.to(Device.DEFAULT)
+    return warp_perspective_tinygrad(frame[:H,:W], M_inv, (1440, 960)).reshape(-1,960*1440)
+  warp_dm_jit = TinyJit(warp_dm, prune=True)
+  step_times = []
+  for _ in range(10):
+    inputs = [(32*Tensor.randn(H*3//2,W) + 128).cast(dtype='uint8').realize(),
+                  Tensor(Tensor.randn(3,3).mul(8).realize().numpy(), device='NPY')]
+
+    Device.default.synchronize()
+    st = time.perf_counter()
+    out = warp_dm_jit(*inputs)
+    mt = time.perf_counter()
+    Device.default.synchronize()
+    et = time.perf_counter()
+    step_times.append((et-st)*1e3)
+    print(f"enqueue {(mt-st)*1e3:6.2f} ms -- total run {step_times[-1]:6.2f} ms")
+
+  with open(DM_WARP_PKL_PATH, "wb") as f:
+    pickle.dump(warp_dm_jit, f)
+
 if __name__ == "__main__":
-    run_and_save_pickle(WARP_PKL_PATH)
+    run_and_save_pickle()

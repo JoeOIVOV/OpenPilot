@@ -209,7 +209,7 @@ class ModelState:
         new_frames[key] = qcom_tensor_from_opencl_address(self.frames[key].cl_from_vision_buf(bufs[key]).mem_address, ((bufs[key].height * 3)//2,bufs[key].width), dtype=dtypes.uint8)
       else:
         new_frames[key] = self.frames[key].array_from_vision_buf(bufs[key])
-        new_frames[key] = Tensor(new_frames[key], dtype='uint8').realize()
+        new_frames[key] = Tensor(new_frames[key], dtype='uint8').realize().reshape((bufs[key].height * 3)//2, bufs[key].width)
     t1 = time.perf_counter()
     for key in bufs.keys():
       self.transforms_np[key][:,:] = transforms[key][:,:]

@@ -23,7 +23,38 @@ from openpilot.selfdrive.modeld.runners.tinygrad_helpers import qcom_tensor_from
 PROCESS_NAME = "selfdrive.modeld.dmonitoringmodeld"
 SEND_RAW_PRED = os.getenv('SEND_RAW_PRED')
 MODEL_PKL_PATH = Path(__file__).parent / 'models/dmonitoring_model_tinygrad.pkl'
+<<<<<<< HEAD
 METADATA_PATH = Path(__file__).parent / 'models/dmonitoring_model_metadata.pkl'
+=======
+DM_WARP_PKL_PATH = Path(__file__).parent / 'models/dm_warp_tinygrad.pkl'
+
+# TODO: slice from meta
+class DriverStateResult(ctypes.Structure):
+  _fields_ = [
+    ("face_orientation", ctypes.c_float*3),
+    ("face_position", ctypes.c_float*3),
+    ("face_orientation_std", ctypes.c_float*3),
+    ("face_position_std", ctypes.c_float*3),
+    ("face_prob", ctypes.c_float),
+    ("_unused_a", ctypes.c_float*8),
+    ("left_eye_prob", ctypes.c_float),
+    ("_unused_b", ctypes.c_float*8),
+    ("right_eye_prob", ctypes.c_float),
+    ("left_blink_prob", ctypes.c_float),
+    ("right_blink_prob", ctypes.c_float),
+    ("sunglasses_prob", ctypes.c_float),
+    ("_unused_c", ctypes.c_float),
+    ("_unused_d", ctypes.c_float*4),
+    ("not_ready_prob", ctypes.c_float*2)]
+
+
+class DMonitoringModelResult(ctypes.Structure):
+  _fields_ = [
+    ("driver_state_lhd", DriverStateResult),
+    ("driver_state_rhd", DriverStateResult),
+    ("wheel_on_right_prob", ctypes.c_float),
+    ("features", ctypes.c_float*FEATURE_LEN)]
+>>>>>>> 38356c422 (update)
 
 
 class ModelState:
@@ -45,19 +76,25 @@ class ModelState:
     with open(MODEL_PKL_PATH, "rb") as f:
       self.model_run = pickle.load(f)
 
+    with open(DM_WARP_PKL_PATH, "rb") as f:
+      self.image_warp = pickle.load(f)
+
   def run(self, buf: VisionBuf, calib: np.ndarray, transform: np.ndarray) -> tuple[np.ndarray, float]:
     self.numpy_inputs['calib'][0,:] = calib
 
     t1 = time.perf_counter()
 
-    input_img_cl = self.frame.prepare(buf, transform.flatten())
     if TICI:
-      # The imgs tensors are backed by opencl memory, only need init once
-      if 'input_img' not in self.tensor_inputs:
-        self.tensor_inputs['input_img'] = qcom_tensor_from_opencl_address(input_img_cl.mem_address, self.input_shapes['input_img'], dtype=dtypes.uint8)
+      new_frame = qcom_tensor_from_opencl_address(self.frame.cl_from_vision_buf(buf).mem_address, ((buf.height * 3)//2,buf.width), dtype=dtypes.uint8)
     else:
-      self.tensor_inputs['input_img'] = Tensor(self.frame.buffer_from_cl(input_img_cl).reshape(self.input_shapes['input_img']), dtype=dtypes.uint8).realize()
+      new_frame = self.frame.array_from_vision_buf(buf)
+      new_frame = Tensor(new_frame, dtype='uint8').realize().reshape((buf.height * 3)//2, buf.width)
 
+    transform = Tensor(transform.astype(np.float32), device='NPY').realize()
+    print(new_frame.shape)
+    #transform = {k: np.zeros((3,3), dtype=np.float32) for k in self.img_queues}
+
+    self.tensor_inputs['input_img'] = self.image_warp(new_frame, transform)
 
     output = self.model_run(**self.tensor_inputs).contiguous().realize().uop.base.buffer.numpy()
 
