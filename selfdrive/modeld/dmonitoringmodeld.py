@@ -23,39 +23,8 @@ from openpilot.selfdrive.modeld.runners.tinygrad_helpers import qcom_tensor_from
 PROCESS_NAME = "selfdrive.modeld.dmonitoringmodeld"
 SEND_RAW_PRED = os.getenv('SEND_RAW_PRED')
 MODEL_PKL_PATH = Path(__file__).parent / 'models/dmonitoring_model_tinygrad.pkl'
-<<<<<<< HEAD
 METADATA_PATH = Path(__file__).parent / 'models/dmonitoring_model_metadata.pkl'
-=======
 DM_WARP_PKL_PATH = Path(__file__).parent / 'models/dm_warp_tinygrad.pkl'
-
-# TODO: slice from meta
-class DriverStateResult(ctypes.Structure):
-  _fields_ = [
-    ("face_orientation", ctypes.c_float*3),
-    ("face_position", ctypes.c_float*3),
-    ("face_orientation_std", ctypes.c_float*3),
-    ("face_position_std", ctypes.c_float*3),
-    ("face_prob", ctypes.c_float),
-    ("_unused_a", ctypes.c_float*8),
-    ("left_eye_prob", ctypes.c_float),
-    ("_unused_b", ctypes.c_float*8),
-    ("right_eye_prob", ctypes.c_float),
-    ("left_blink_prob", ctypes.c_float),
-    ("right_blink_prob", ctypes.c_float),
-    ("sunglasses_prob", ctypes.c_float),
-    ("_unused_c", ctypes.c_float),
-    ("_unused_d", ctypes.c_float*4),
-    ("not_ready_prob", ctypes.c_float*2)]
-
-
-class DMonitoringModelResult(ctypes.Structure):
-  _fields_ = [
-    ("driver_state_lhd", DriverStateResult),
-    ("driver_state_rhd", DriverStateResult),
-    ("wheel_on_right_prob", ctypes.c_float),
-    ("features", ctypes.c_float*FEATURE_LEN)]
->>>>>>> 38356c422 (update)
-
 
 class ModelState:
   inputs: dict[str, np.ndarray]

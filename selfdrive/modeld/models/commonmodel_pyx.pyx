@@ -32,28 +32,12 @@ cdef class CLMem:
   def mem_address(self):
     return <uintptr_t>(self.mem)
 
-def cl_from_visionbuf(VisionBuf buf):
-  return CLMem.create(<void*>&buf.buf.buf_cl)
-
-
 cdef class ModelFrame:
   cdef cppModelFrame * frame
   cdef int buf_size
 
   def __dealloc__(self):
     del self.frame
-
-  def prepare(self, VisionBuf buf, float[:] projection):
-    cdef mat3 cprojection
-    memcpy(cprojection.v, &projection[0], 9*sizeof(float))
-    cdef cl_mem * data
-    data = self.frame.prepare(buf.buf.buf_cl, buf.width, buf.height, buf.stride, buf.uv_offset, cprojection)
-    return CLMem.create(data)
-
-  def buffer_from_cl(self, CLMem in_frames):
-    cdef unsigned char * data2
-    data2 = self.frame.buffer_from_cl(in_frames.mem, self.buf_size)
-    return np.asarray(<cnp.uint8_t[:self.buf_size]> data2)
 
   def array_from_vision_buf(self, VisionBuf vbuf):
     cdef unsigned char * data3

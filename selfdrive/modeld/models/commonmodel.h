@@ -23,7 +23,6 @@ public:
     q = CL_CHECK_ERR(clCreateCommandQueue(context, device_id, 0, &err));
   }
   virtual ~ModelFrame() {}
-  virtual cl_mem* prepare(cl_mem yuv_cl, int frame_width, int frame_height, int frame_stride, int frame_uv_offset, const mat3& projection) { return NULL; }
   uint8_t* buffer_from_cl(cl_mem *in_frames, int buffer_size) {
     CL_CHECK(clEnqueueReadBuffer(q, *in_frames, CL_TRUE, 0, buffer_size, input_frames.get(), 0, nullptr, nullptr));
     clFinish(q);
@@ -76,7 +75,6 @@ public:
   DrivingModelFrame(cl_device_id device_id, cl_context context, int _temporal_skip);
   ~DrivingModelFrame();
   uint8_t* buffer_from_cl(cl_mem *in_frames);
-  cl_mem* prepare(cl_mem yuv_cl, int frame_width, int frame_height, int frame_stride, int frame_uv_offset, const mat3& projection);
 
   const int MODEL_WIDTH = 512;
   const int MODEL_HEIGHT = 256;
@@ -97,7 +95,6 @@ class MonitoringModelFrame : public ModelFrame {
 public:
   MonitoringModelFrame(cl_device_id device_id, cl_context context);
   ~MonitoringModelFrame();
-  cl_mem* prepare(cl_mem yuv_cl, int frame_width, int frame_height, int frame_stride, int frame_uv_offset, const mat3& projection);
 
   const int MODEL_WIDTH = 1440;
   const int MODEL_HEIGHT = 960;
