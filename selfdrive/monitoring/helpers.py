@@ -372,24 +372,24 @@ class DriverMonitoring:
   def get_state_packet(self, valid=True):
     # build driverMonitoringState packet
     dat = messaging.new_message('driverMonitoringState', valid=valid)
-    dat.driverMonitoringState = {
-      "events": self.current_events.to_msg(),
-      "faceDetected": self.face_detected,
-      "isDistracted": self.driver_distracted,
-      "distractedType": sum(self.distracted_types),
-      "awarenessStatus": self.awareness,
-      "posePitchOffset": self.pose.pitch_offseter.filtered_stat.mean(),
-      "posePitchValidCount": self.pose.pitch_offseter.filtered_stat.n,
-      "poseYawOffset": self.pose.yaw_offseter.filtered_stat.mean(),
-      "poseYawValidCount": self.pose.yaw_offseter.filtered_stat.n,
-      "stepChange": self.step_change,
-      "awarenessActive": self.awareness_active,
-      "awarenessPassive": self.awareness_passive,
-      "isLowStd": self.pose.low_std,
-      "hiStdCount": self.hi_stds,
-      "isActiveMode": self.active_monitoring_mode,
-      "isRHD": self.wheel_on_right,
-    }
+    #dat.driverMonitoringState = {
+      #"events": self.current_events.to_msg(),
+      #"faceDetected": self.face_detected,
+      #"isDistracted": self.driver_distracted,
+      #"distractedType": sum(self.distracted_types),
+      #"awarenessStatus": self.awareness,
+      #"posePitchOffset": self.pose.pitch_offseter.filtered_stat.mean(),
+      #"posePitchValidCount": self.pose.pitch_offseter.filtered_stat.n,
+      #"poseYawOffset": self.pose.yaw_offseter.filtered_stat.mean(),
+      #"poseYawValidCount": self.pose.yaw_offseter.filtered_stat.n,
+      #"stepChange": self.step_change,
+      #"awarenessActive": self.awareness_active,
+      #"awarenessPassive": self.awareness_passive,
+      #"isLowStd": self.pose.low_std,
+      #"hiStdCount": self.hi_stds,
+      #"isActiveMode": self.active_monitoring_mode,
+      #"isRHD": self.wheel_on_right,
+    #}
     return dat
 
   def run_step(self, sm):
