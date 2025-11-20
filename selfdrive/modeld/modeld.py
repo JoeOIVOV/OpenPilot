@@ -201,7 +201,8 @@ class ModelState:
     inputs['desire_pulse'][0] = 0
     new_desire = np.where(inputs['desire_pulse'] - self.prev_desire > .99, inputs['desire_pulse'], 0)
     self.prev_desire[:] = inputs['desire_pulse']
-
+    import time
+    t0 = time.perf_counter()
     new_frames = {}
     for key in bufs.keys():
       if TICI and not USBGPU:
@@ -211,18 +212,27 @@ class ModelState:
         new_frames[key] = Tensor(new_frames[key], dtype='uint8').realize()
     for key in bufs.keys():
       self.transforms_np[key][:,:] = transforms[key][:,:]
+    t1 = time.perf_counter()
     Device.default.synchronize()
+    t2 = time.perf_counter()
 
     out = self.update_imgs(self.img_queues['img'], new_frames['img'], self.transforms['img'],
                            self.img_queues['big_img'], new_frames['big_img'], self.transforms['big_img'])
     self.img_queues['img'], self.img_queues['big_img'], = out[0].realize(), out[2].realize()
-    vision_inputs = {}
-    vision_inputs['img'], vision_inputs['big_img'] = out[1][None,:,:,:].realize(), out[3][None,:,:,:].realize()
+    t3 = time.perf_counter()
+    vision_inputs = {'img': out[1], 'big_img': out[3]}
+    t4 = time.perf_counter()
 
     if prepare_only:
       return None
 
     self.vision_output = self.vision_run(**vision_inputs).contiguous().realize().uop.base.buffer.numpy()
+    t5 = time.perf_counter()
+    #print(f'img read took {1000*(t1-t0):.2f}ms')
+    #print(f'img sync took {1000*(t2-t1):.2f}ms')
+    #print(f'img warp took {1000*(t3-t2):.2f}ms')
+    #print(f'input prep took {1000*(t4-t3):.2f}ms')
+    #print(f'model run took {1000*(t5-t4):.2f}ms')
     vision_outputs_dict = self.parser.parse_vision_outputs(self.slice_outputs(self.vision_output, self.vision_output_slices))
 
     self.full_input_queues.enqueue({'features_buffer': vision_outputs_dict['hidden_state'], 'desire_pulse': new_desire})

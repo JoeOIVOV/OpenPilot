@@ -2,6 +2,7 @@
 import time
 import pickle
 import numpy as np
+from pathlib import Path
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import Context
 from tinygrad.device import Device
@@ -65,7 +66,7 @@ def update_img_input_tinygrad(tensor, frame, M_inv):
   M_inv = M_inv.to(Device.DEFAULT)
   new_img = frame_prepare_tinygrad(frame, M_inv)
   full_buffer = tensor[6:].cat(new_img, dim=0).contiguous()
-  return full_buffer, Tensor.cat(full_buffer[:6], full_buffer[-6:], dim=0).contiguous()
+  return full_buffer, Tensor.cat(full_buffer[:6], full_buffer[-6:], dim=0).contiguous().reshape(1,12,MODEL_HEIGHT//2,MODEL_WIDTH//2)
 
 def update_both_imgs_tinygrad(calib_img_buffer, new_img, M_inv,
                               calib_big_img_buffer, new_big_img, M_inv_big):
@@ -119,7 +120,7 @@ def frame_prepare_np(input_frame, M_inv):
 def update_img_input_np(tensor, frame, M_inv):
   tensor[:-6]  = tensor[6:]
   tensor[-6:] = frame_prepare_np(frame, M_inv)
-  return tensor, np.concatenate([tensor[:6], tensor[-6:]], axis=0)
+  return tensor, np.concatenate([tensor[:6], tensor[-6:]], axis=0).reshape((1,12,MODEL_HEIGHT//2, MODEL_WIDTH//2))
 
 def update_both_imgs_np(calib_img_buffer, new_img, M_inv,
                         calib_big_img_buffer, new_big_img, M_inv_big):
