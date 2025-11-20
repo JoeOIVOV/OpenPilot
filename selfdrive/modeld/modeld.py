@@ -213,9 +213,9 @@ class ModelState:
       self.transforms_np[key][:,:] = transforms[key][:,:]
     Device.default.synchronize()
 
-    out = self.update_imgs(self.full_img_input['img'], new_frames['img'], self.transforms['img'],
-                           self.full_img_input['big_img'], new_frames['big_img'], self.transforms['big_img'])
-    self.full_img_input['img'], self.full_img_input['big_img'], = out[0].realize(), out[2].realize()
+    out = self.update_imgs(self.img_queues['img'], new_frames['img'], self.transforms['img'],
+                           self.img_queues['big_img'], new_frames['big_img'], self.transforms['big_img'])
+    self.img_queues['img'], self.img_queues['big_img'], = out[0].realize(), out[2].realize()
     vision_inputs = {}
     vision_inputs['img'], vision_inputs['big_img'] = out[1][None,:,:,:].realize(), out[3][None,:,:,:].realize()
 
