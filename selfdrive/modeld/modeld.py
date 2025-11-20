@@ -29,7 +29,7 @@ from openpilot.selfdrive.controls.lib.drive_helpers import get_accel_from_plan, 
 from openpilot.selfdrive.modeld.parse_model_outputs import Parser
 from openpilot.selfdrive.modeld.fill_model_msg import fill_model_msg, fill_pose_msg, PublishState
 from openpilot.selfdrive.modeld.constants import ModelConstants, Plan
-from openpilot.selfdrive.modeld.models.commonmodel_pyx import DrivingModelFrame, CLContext
+from openpilot.selfdrive.modeld.models.commonmodel_pyx import DrivingModelFrame, CLContext, cl_from_vision_buf
 from openpilot.selfdrive.modeld.runners.tinygrad_helpers import qcom_tensor_from_opencl_address
 IMG_BUFFER_SHAPE = (30, 128, 256)
 
@@ -227,7 +227,7 @@ class ModelState:
     new_frames = {}
     for key in bufs.keys():
       if TICI and not USBGPU:
-        new_frames[key] = qcom_tensor_from_opencl_address(bufs[key].mem_address, (bufs[key].w, bufs[key].h), dtype=dtypes.uint8)
+        new_frames[key] = qcom_tensor_from_opencl_address(cl_from_vision_buf(bufs[key].mem_address), (bufs[key].w, bufs[key].h), dtype=dtypes.uint8)
       else:
         new_frames[key] = self.frames[key].array_from_vision_buf(bufs[key])
     for key in bufs.keys():
