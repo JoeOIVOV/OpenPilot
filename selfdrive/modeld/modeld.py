@@ -31,6 +31,7 @@ from openpilot.selfdrive.modeld.fill_model_msg import fill_model_msg, fill_pose_
 from openpilot.selfdrive.modeld.constants import ModelConstants, Plan
 from openpilot.selfdrive.modeld.models.commonmodel_pyx import DrivingModelFrame, CLContext
 from openpilot.selfdrive.modeld.runners.tinygrad_helpers import qcom_tensor_from_opencl_address
+IMG_BUFFER_SHAPE = (30, 128, 256)
 
 from tinygrad.tensor import Tensor
 import ctypes, array
@@ -41,7 +42,6 @@ from tinygrad.device import Device
 Tensor.manual_seed(1337)
 Tensor.no_grad = True
 
-TG_TRANSFORM = True
 PROCESS_NAME = "selfdrive.modeld.modeld"
 SEND_RAW_PRED = os.getenv('SEND_RAW_PRED')
 
@@ -180,17 +180,12 @@ class ModelState:
     self.full_input_queues.reset()
 
     # img buffers are managed in openCL transform code
-    if TG_TRANSFORM:
-      self.full_img_input = {'img': Tensor.zeros(IMG_INPUT_SHAPE, dtype='uint8').contiguous().realize(),
-                                              'big_img': Tensor.zeros(IMG_INPUT_SHAPE, dtype='uint8').contiguous().realize(),}
-    else:
-      self.full_img_input = {'img': np.zeros(IMG_INPUT_SHAPE, dtype=np.uint8),
-                                              'big_img': np.zeros(IMG_INPUT_SHAPE, dtype=np.uint8),}
+    self.full_img_input = {'img': Tensor.zeros(IMG_INPUT_SHAPE, dtype='uint8').contiguous().realize(),
+                           'big_img': Tensor.zeros(IMG_INPUT_SHAPE, dtype='uint8').contiguous().realize(),}
     self.vision_output = np.zeros(vision_output_size, dtype=np.float32)
     self.policy_inputs = {k: Tensor(v, device='NPY').realize() for k,v in self.numpy_inputs.items()}
     self.policy_output = np.zeros(policy_output_size, dtype=np.float32)
     self.parser = Parser()
-
 
     with open(VISION_PKL_PATH, "rb") as f:
       self.vision_run = pickle.load(f)
@@ -198,12 +193,8 @@ class ModelState:
     with open(POLICY_PKL_PATH, "rb") as f:
       self.policy_run = pickle.load(f)
   
-    if TG_TRANSFORM:
-      with open(WARP_PKL_PATH, "rb") as f:
-        self.update_imgs = pickle.load(f)
-    else:
-      from openpilot.selfdrive.modeld.compile_warp import update_both_imgs_np
-      self.update_imgs = update_both_imgs_np
+    with open(WARP_PKL_PATH, "rb") as f:
+      self.update_imgs = pickle.load(f)
 
   def slice_outputs(self, model_outputs: np.ndarray, output_slices: dict[str, slice]) -> dict[str, np.ndarray]:
     parsed_model_outputs = {k: model_outputs[np.newaxis, v] for k,v in output_slices.items()}
@@ -215,8 +206,6 @@ class ModelState:
     inputs['desire_pulse'][0] = 0
     new_desire = np.where(inputs['desire_pulse'] - self.prev_desire > .99, inputs['desire_pulse'], 0)
     self.prev_desire[:] = inputs['desire_pulse']
-
-    #imgs_cl = {name: self.frames[name].prepare(bufs[name], transforms[name].flatten()) for name in self.vision_input_names}
 
     #if TICI and not USBGPU:
     #  # The imgs tensors are backed by opencl memory, only need init once
@@ -233,23 +222,24 @@ class ModelState:
     #   self.vision_inputs[k] = Tensor(v)
 
     #assert False, transforms.keys()
-    vision_inputs = {}
 
 
     new_frames = {}
     for key in bufs.keys():
-      # Why is key referenced twice here?
-      new_frames[key] = self.frames[key].array_from_vision_buf(bufs[key])
-    if TG_TRANSFORM:
-      for key in bufs.keys():
-        transforms[key] = Tensor(transforms[key].reshape(3,3), dtype=dtypes.float32).realize()
-        new_frames[key] = Tensor(new_frames[key], dtype='uint8').realize()
+      if TICI and not USBGPU:
+        new_frames[key] = qcom_tensor_from_opencl_address(bufs[key].mem_address, (bufs[key].w, bufs[key].h), dtype=dtypes.uint8)
+      else:
+        new_frames[key] = self.frames[key].array_from_vision_buf(bufs[key])
+    for key in bufs.keys():
+      transforms[key] = Tensor(transforms[key].reshape(3,3), dtype=dtypes.float32).realize()
+      new_frames[key] = Tensor(new_frames[key], dtype='uint8').realize()
     Device.default.synchronize()
 
     t0 = time.perf_counter()
     out = self.update_imgs(self.full_img_input['img'], new_frames['img'], transforms['img'],
                            self.full_img_input['big_img'], new_frames['big_img'], transforms['big_img'])
     self.full_img_input['img'], self.full_img_input['big_img'], = out[0].realize(), out[2].realize()
+    vision_inputs = {}
     vision_inputs['img'], vision_inputs['big_img'] = out[1][None,:,:,:].realize(), out[3][None,:,:,:].realize()
     Device.default.synchronize()
     t1 = time.perf_counter()
@@ -257,9 +247,6 @@ class ModelState:
 
     if prepare_only:
       return None
-    if not TG_TRANSFORM:
-      vision_inputs['img'] = Tensor(vision_inputs['img'], dtype='uint8').realize()
-      vision_inputs['big_img'] = Tensor(vision_inputs['big_img'], dtype='uint8').realize()
 
     self.vision_output = self.vision_run(**vision_inputs).contiguous().realize().uop.base.buffer.numpy()
     vision_outputs_dict = self.parser.parse_vision_outputs(self.slice_outputs(self.vision_output, self.vision_output_slices))
