@@ -207,28 +207,10 @@ class ModelState:
     new_desire = np.where(inputs['desire_pulse'] - self.prev_desire > .99, inputs['desire_pulse'], 0)
     self.prev_desire[:] = inputs['desire_pulse']
 
-    #if TICI and not USBGPU:
-    #  # The imgs tensors are backed by opencl memory, only need init once
-    #  for key in imgs_cl:
-    #    if key not in self.vision_inputs:
-    #      self.vision_inputs[key] = qcom_tensor_from_opencl_address(imgs_cl[key].mem_address, self.vision_input_shapes[key], dtype=dtypes.uint8)
-    #else:
-    #  for key in imgs_cl:
-    #    frame_input = self.frames[key].buffer_from_cl(imgs_cl[key]).reshape(self.vision_input_shapes[key])
-    #    self.vision_inputs[key] = Tensor(frame_input, dtype=dtypes.uint8).realize()
-
-
-    #for k, v in self.numpy_inputs.items():
-    #   self.vision_inputs[k] = Tensor(v)
-
-    #assert False, transforms.keys()
-
-
     new_frames = {}
     for key in bufs.keys():
       if TICI and not USBGPU:
         new_frames[key] = qcom_tensor_from_opencl_address(self.frames[key].cl_from_vision_buf(bufs[key]).mem_address, ((bufs[key].height * 3)//2,bufs[key].width), dtype=dtypes.uint8).reshape(-1)
-        #print(new_frames[key][:100].numpy())
       else:
         new_frames[key] = self.frames[key].array_from_vision_buf(bufs[key])
         new_frames[key] = Tensor(new_frames[key], dtype='uint8').realize()
@@ -236,15 +218,11 @@ class ModelState:
       transforms[key] = Tensor(transforms[key].reshape(3,3), dtype=dtypes.float32).realize()
     Device.default.synchronize()
 
-    t0 = time.perf_counter()
     out = self.update_imgs(self.full_img_input['img'], new_frames['img'], transforms['img'],
                            self.full_img_input['big_img'], new_frames['big_img'], transforms['big_img'])
     self.full_img_input['img'], self.full_img_input['big_img'], = out[0].realize(), out[2].realize()
     vision_inputs = {}
     vision_inputs['img'], vision_inputs['big_img'] = out[1][None,:,:,:].realize(), out[3][None,:,:,:].realize()
-    Device.default.synchronize()
-    t1 = time.perf_counter()
-    #print(f"update_img_jit took {(t1 - t0) * 1000:.2f} ms")
 
     if prepare_only:
       return None
@@ -259,7 +237,6 @@ class ModelState:
 
     self.policy_output = self.policy_run(**self.policy_inputs).contiguous().realize().uop.base.buffer.numpy()
     policy_outputs_dict = self.parser.parse_policy_outputs(self.slice_outputs(self.policy_output, self.policy_output_slices))
-    #print(policy_outputs_dict['plan'][0,0,3])
 
     combined_outputs_dict = {**vision_outputs_dict, **policy_outputs_dict}
     if SEND_RAW_PRED:
