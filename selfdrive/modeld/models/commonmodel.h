@@ -46,7 +46,7 @@ protected:
   cl_mem y_cl, u_cl, v_cl;
   Transform transform;
   cl_command_queue q;
-  cl_mem net_input_cl, input_frames_cl;
+  cl_mem net_input_cl, input_frames_cl, single_frame_cl;
   std::unique_ptr<uint8_t[]> input_frames;
   std::unique_ptr<uint8_t[]> full_input_frame;
 
